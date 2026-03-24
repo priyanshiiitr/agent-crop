@@ -140,6 +140,22 @@ class PlanCandidate:
 
 
 @dataclass
+class GroundingCandidate:
+    phrase: str
+    bbox: BoundingBox
+    score: float
+    source: str
+
+    def to_dict(self) -> dict:
+        return {
+            "phrase": self.phrase,
+            "bbox": self.bbox.to_dict(),
+            "score": round(self.score, 4),
+            "source": self.source,
+        }
+
+
+@dataclass
 class QualityMetrics:
     score: float
     accepted: bool
@@ -168,6 +184,9 @@ class StepResult:
     overlay_data_url: str
     edited_data_url: str
     attempts: int
+    grounding_phrases: List[str] = field(default_factory=list)
+    grounding_candidates: List[GroundingCandidate] = field(default_factory=list)
+    localizer_mode: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -178,6 +197,9 @@ class StepResult:
             "overlay_image": self.overlay_data_url,
             "edited_image": self.edited_data_url,
             "attempts": self.attempts,
+            "grounding_phrases": list(self.grounding_phrases),
+            "grounding_candidates": [candidate.to_dict() for candidate in self.grounding_candidates],
+            "localizer_mode": self.localizer_mode,
         }
 
 
@@ -253,6 +275,7 @@ class SessionState:
 class PipelineResult:
     session_id: str
     mode: str
+    grounding_mode: str
     instruction: str
     folded_context: FoldedContext
     parsed_edits: List[ParsedEdit]
@@ -267,6 +290,7 @@ class PipelineResult:
         return {
             "session_id": self.session_id,
             "mode": self.mode,
+            "grounding_mode": self.grounding_mode,
             "instruction": self.instruction,
             "folded_context": self.folded_context.to_dict(),
             "parsed_edits": [edit.to_dict() for edit in self.parsed_edits],

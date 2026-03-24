@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from .models import BoundingBox
+import re
+
+from .models import BoundingBox, GroundingCandidate
 
 FACE_ACCESSORY_KEYWORDS = {"glasses", "eyeglasses", "spectacles", "sunglasses", "goggles", "frames", "eyewear"}
 HEAD_ACCESSORY_KEYWORDS = {"hat", "cap", "helmet", "headband", "tiara", "veil"}
@@ -19,6 +21,46 @@ def classify_target(target: str, verb: str = "") -> str:
     if any(keyword in lowered for keyword in GLOBAL_KEYWORDS):
         return "global_region"
     return "generic_local"
+
+
+def grounding_phrases_for_target(target: str, modifiers: list[str], verb: str) -> list[str]:
+    phrases: list[str] = []
+    lowered_target = target.lower().strip()
+    if lowered_target:
+        phrases.append(lowered_target)
+
+    if any(keyword in lowered_target for keyword in FACE_ACCESSORY_KEYWORDS):
+        accessory_terms = [keyword for keyword in FACE_ACCESSORY_KEYWORDS if keyword in lowered_target]
+        phrases.extend(accessory_terms)
+        phrases.append("eyewear")
+
+    if any(keyword in lowered_target for keyword in HEAD_ACCESSORY_KEYWORDS):
+        phrases.extend(keyword for keyword in HEAD_ACCESSORY_KEYWORDS if keyword in lowered_target)
+
+    if any(keyword in lowered_target for keyword in SMALL_ACCESSORY_KEYWORDS):
+        phrases.extend(keyword for keyword in SMALL_ACCESSORY_KEYWORDS if keyword in lowered_target)
+
+    if verb == "replace":
+        cleaned_target = re.sub(r"\b(?:worn by|on|from|near)\b.*", "", lowered_target).strip()
+        if cleaned_target:
+            phrases.append(cleaned_target)
+
+    for modifier in modifiers:
+        if verb == "replace" and modifier.lower().startswith("with "):
+            continue
+        cleaned = modifier.lower().strip()
+        if cleaned:
+            phrases.append(cleaned)
+
+    deduped = []
+    seen = set()
+    for phrase in phrases:
+        normalized = " ".join(phrase.split())
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def max_bbox_area_ratio(profile: str) -> float:
@@ -62,6 +104,31 @@ def fallback_box_for_profile(image_size: tuple[int, int], profile: str) -> Bound
         center_y = int(height * 0.42)
         return box_from_center(center_x, center_y, box_width, box_height, image_size)
     return box_from_center(width // 2, height // 2, max(64, int(width * 0.38)), max(64, int(height * 0.38)), image_size)
+
+
+def rank_grounding_candidates(
+    candidates: list[GroundingCandidate],
+    image_size: tuple[int, int],
+    profile: str,
+) -> list[GroundingCandidate]:
+    width, height = image_size
+    image_area = max(1, width * height)
+
+    def candidate_score(candidate: GroundingCandidate) -> float:
+        area_ratio = candidate.bbox.area / image_area
+        max_ratio = max_bbox_area_ratio(profile)
+        size_score = 1.0 if area_ratio <= max_ratio else max(0.0, 1.0 - min(1.0, (area_ratio - max_ratio) / max_ratio))
+        center_x = (candidate.bbox.left + candidate.bbox.right) / 2.0
+        center_y = (candidate.bbox.top + candidate.bbox.bottom) / 2.0
+        vertical_score = 1.0
+        if profile in {"face_accessory", "head_accessory"}:
+            target_band = 0.22 if profile == "face_accessory" else 0.18
+            vertical_score = max(0.0, 1.0 - abs((center_y / max(1, height)) - target_band) / 0.35)
+        horizontal_score = max(0.0, 1.0 - abs((center_x / max(1, width)) - 0.40) / 0.6)
+        phrase_bonus = 0.1 if candidate.source == "phrase-grounding" else 0.0
+        return 0.52 * candidate.score + 0.24 * size_score + 0.14 * vertical_score + 0.10 * horizontal_score + phrase_bonus
+
+    return sorted(candidates, key=candidate_score, reverse=True)
 
 
 def refine_bbox_for_profile(

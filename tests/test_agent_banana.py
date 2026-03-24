@@ -11,12 +11,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agent_banana.memory import ContextFolder  # noqa: E402
+from agent_banana.models import BoundingBox, GroundingCandidate  # noqa: E402
 from agent_banana.nano_banana import MockNanoBananaClient  # noqa: E402
 from agent_banana.pipeline import AgentBananaApp  # noqa: E402
 from agent_banana.planning import RLPlanner, RLValueStore  # noqa: E402
 from agent_banana.quality import QualityJudge  # noqa: E402
-from agent_banana.targeting import classify_target, refine_bbox_for_profile  # noqa: E402
-from agent_banana.vision import assess_preview_framing, decode_image_payload, fit_image_inside_canvas, infer_bbox_from_preview  # noqa: E402
+from agent_banana.targeting import classify_target, rank_grounding_candidates, refine_bbox_for_profile  # noqa: E402
+from agent_banana.vision import assess_preview_framing, decode_image_payload, fit_image_inside_canvas  # noqa: E402
+from agent_banana.vlm_localizer import GroundingResult, MockVlmLocalizer, VlmLocalizer  # noqa: E402
 
 
 def make_test_image() -> Image.Image:
@@ -25,6 +27,17 @@ def make_test_image() -> Image.Image:
     draw.ellipse((72, 48, 146, 122), fill="#d97706", outline="#8c3b12", width=3)
     draw.rectangle((20, 132, 200, 164), fill="#d7e1c6")
     return image
+
+
+class FakeVlmLocalizer(VlmLocalizer):
+    def __init__(self, candidates: list[GroundingCandidate]):
+        self._candidates = list(candidates)
+
+    def mode_label(self) -> str:
+        return "fake-vlm"
+
+    def localize(self, image: Image.Image, phrases: list[str], *, profile: str) -> GroundingResult:
+        return GroundingResult(phrases=list(phrases), candidates=list(self._candidates))
 
 
 class AgentBananaPlannerTests(unittest.TestCase):
@@ -51,36 +64,47 @@ class AgentBananaPlannerTests(unittest.TestCase):
         self.assertEqual(classify_target(edits[0].target, edits[0].verb), "face_accessory")
         self.assertEqual(candidates[0].steps[0].mode, "preview_tight")
 
+    def test_glasses_replacement_prefers_tight_local_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            planner = RLPlanner(RLValueStore(Path(tmp_dir) / "planner.json"))
+            context = ContextFolder().fold([])
+            edits = planner.parse_instruction("Replace the spectacles worn by the grandma with red spectacles.", context)
+            candidates = planner.plan(edits, context)
+
+        self.assertEqual(classify_target(edits[0].target, edits[0].verb), "face_accessory")
+        self.assertEqual(candidates[0].steps[0].mode, "preview_tight")
+
 
 class AgentBananaVisionTests(unittest.TestCase):
-    def test_preview_diff_infers_reasonable_bbox(self) -> None:
-        source = Image.new("RGB", (200, 200), "white")
-        preview = source.copy()
-        draw = ImageDraw.Draw(preview)
-        draw.rectangle((40, 50, 100, 120), fill="#d97706")
-
-        bbox = infer_bbox_from_preview(source, preview, threshold=10, padding=0)
-
-        self.assertIsNotNone(bbox)
-        assert bbox is not None
-        self.assertLessEqual(bbox.left, 40)
-        self.assertLessEqual(bbox.top, 50)
-        self.assertGreaterEqual(bbox.right, 100)
-        self.assertGreaterEqual(bbox.bottom, 120)
-
-    def test_face_accessory_bbox_is_shrunk_from_large_preview_region(self) -> None:
+    def test_face_accessory_bbox_is_shrunk_from_large_grounding_region(self) -> None:
         source = Image.new("RGB", (480, 640), "white")
-        preview = source.copy()
-        draw = ImageDraw.Draw(preview)
-        draw.rectangle((70, 30, 240, 220), fill="#444444")
-
-        raw_bbox = infer_bbox_from_preview(source, preview, threshold=10, padding=0)
-        assert raw_bbox is not None
+        raw_bbox = BoundingBox(left=70, top=30, right=240, bottom=220)
         refined = refine_bbox_for_profile(raw_bbox, source.size, "face_accessory")
 
         self.assertLess(refined.area, raw_bbox.area)
         self.assertLessEqual(refined.width, int(source.size[0] * 0.28))
         self.assertLessEqual(refined.height, int(source.size[1] * 0.14))
+
+    def test_grounding_candidate_ranking_prefers_plausible_face_accessory_box(self) -> None:
+        image_size = (480, 640)
+        candidates = [
+            GroundingCandidate(
+                phrase="spectacles",
+                bbox=BoundingBox(left=40, top=20, right=280, bottom=260),
+                score=0.95,
+                source="phrase-grounding",
+            ),
+            GroundingCandidate(
+                phrase="spectacles",
+                bbox=BoundingBox(left=88, top=82, right=180, bottom=132),
+                score=0.82,
+                source="phrase-grounding",
+            ),
+        ]
+
+        ranked = rank_grounding_candidates(candidates, image_size, "face_accessory")
+
+        self.assertEqual(ranked[0].bbox.as_tuple(), (88, 82, 180, 132))
 
     def test_preview_framing_assessment_detects_reframed_preview(self) -> None:
         source = make_test_image().resize((480, 640))
@@ -103,11 +127,7 @@ class AgentBananaQualityTests(unittest.TestCase):
         quality = judge.evaluate(
             before,
             after,
-            refine_bbox_for_profile(
-                infer_bbox_from_preview(before, after, threshold=10, padding=0),
-                before.size,
-                "face_accessory",
-            ),
+            BoundingBox(left=40, top=40, right=180, bottom=170),
             preview=after,
             target="glasses",
             verb="remove",
@@ -121,12 +141,23 @@ class AgentBananaPipelineTests(unittest.TestCase):
     def test_mock_pipeline_runs_end_to_end_and_persists_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            app = AgentBananaApp(root=root, image_client=MockNanoBananaClient())
+            localizer = FakeVlmLocalizer(
+                [
+                    GroundingCandidate(
+                        phrase="fruit",
+                        bbox=BoundingBox(left=72, top=48, right=146, bottom=122),
+                        score=0.92,
+                        source="phrase-grounding",
+                    )
+                ]
+            )
+            app = AgentBananaApp(root=root, image_client=MockNanoBananaClient(), localizer=localizer)
             image = make_test_image()
 
             result = app.run(image, "Replace the center fruit with a banana and warm the background.")
 
             self.assertEqual(result.mode, "mock-nano-banana")
+            self.assertEqual(result.grounding_mode, "fake-vlm")
             self.assertEqual(len(result.step_results), 2)
             self.assertTrue(result.session_id)
             session_path = root / "artifacts" / "agent_banana" / "sessions" / f"{result.session_id}.json"
@@ -137,26 +168,30 @@ class AgentBananaPipelineTests(unittest.TestCase):
             self.assertIsNotNone(diff.getbbox())
             self.assertGreater(result.reward, 0.0)
 
-    def test_local_edit_ignores_reframed_preview_for_localization(self) -> None:
+    def test_local_edit_uses_vlm_localization_instead_of_preview_diff(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
-            app = AgentBananaApp(root=root, image_client=MockNanoBananaClient())
-            image = make_test_image().resize((480, 640))
-            step = app.planner.plan(
-                app.planner.parse_instruction("Remove the glasses from the woman.", ContextFolder().fold([])),
-                ContextFolder().fold([]),
-            )[0].steps[0]
-            cropped = image.crop((80, 0, 400, 640))
-
-            normalized_preview, use_preview = app._prepare_preview_for_localization(
-                image,
-                cropped,
-                step,
-                "face_accessory",
+            localizer = FakeVlmLocalizer(
+                [
+                    GroundingCandidate(
+                        phrase="glasses",
+                        bbox=BoundingBox(left=110, top=90, right=182, bottom=132),
+                        score=0.94,
+                        source="phrase-grounding",
+                    )
+                ]
             )
+            app = AgentBananaApp(root=root, image_client=MockNanoBananaClient(), localizer=localizer)
+            image = make_test_image().resize((480, 640))
+            result = app.run(image, "Remove the glasses from the woman.")
 
-            self.assertFalse(use_preview)
-            self.assertEqual(normalized_preview.size, image.size)
+            self.assertEqual(result.step_results[0].localizer_mode, "fake-vlm")
+            self.assertEqual(result.step_results[0].grounding_candidates[0].bbox.as_tuple(), (110, 90, 182, 132))
+
+    def test_mock_localizer_is_available_without_transformers(self) -> None:
+        localizer = MockVlmLocalizer()
+        result = localizer.localize(make_test_image(), ["glasses"], profile="face_accessory")
+        self.assertTrue(result.candidates)
 
 
 if __name__ == "__main__":

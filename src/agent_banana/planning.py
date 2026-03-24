@@ -262,7 +262,7 @@ class RLPlanner:
         profile = classify_target(edit.target, edit.verb)
         if edit.scope == "global":
             modes = ("global_preview", "preview_expand")
-        elif profile in {"face_accessory", "small_accessory"} and edit.verb == "remove":
+        elif profile in {"face_accessory", "small_accessory"} and edit.verb in {"remove", "replace"}:
             modes = ("preview_tight", "preview_local", "preview_expand")
         elif edit.verb in {"replace", "remove"}:
             modes = ("preview_expand", "preview_local", "global_preview")
@@ -394,7 +394,7 @@ class RLPlanner:
         profile = classify_target(step.target, step.verb)
         if step.scope == "global":
             return 1.0 if step.mode == "global_preview" else 0.68
-        if profile in {"face_accessory", "small_accessory"} and step.verb == "remove":
+        if profile in {"face_accessory", "small_accessory"} and step.verb in {"remove", "replace"}:
             if step.mode == "preview_tight":
                 return 1.0
             if step.mode == "preview_local":

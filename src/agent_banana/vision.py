@@ -4,7 +4,7 @@ import base64
 import io
 from pathlib import Path
 
-from PIL import Image, ImageChops, ImageColor, ImageDraw
+from PIL import Image, ImageColor, ImageDraw
 
 from .models import BoundingBox
 
@@ -68,27 +68,6 @@ def center_box(image_size: tuple[int, int], scale: float = 0.38) -> BoundingBox:
     left = (width - box_width) // 2
     top = (height - box_height) // 2
     return BoundingBox(left=left, top=top, right=left + box_width, bottom=top + box_height)
-
-
-def infer_bbox_from_preview(
-    source: Image.Image,
-    preview: Image.Image,
-    *,
-    threshold: int = 24,
-    padding: int = 16,
-    minimum_area: int = 24 * 24,
-) -> BoundingBox | None:
-    source = ensure_rgb(source)
-    preview = ensure_rgb(preview).resize(source.size)
-    diff = ImageChops.difference(source, preview).convert("L")
-    diff = diff.point(lambda value: 255 if value >= threshold else 0)
-    bbox = diff.getbbox()
-    if bbox is None:
-        return None
-    candidate = BoundingBox(left=bbox[0], top=bbox[1], right=bbox[2], bottom=bbox[3])
-    if candidate.area < minimum_area:
-        return None
-    return expand_box(candidate, padding, source.size)
 
 
 def region_mean_difference(before: Image.Image, after: Image.Image, box: BoundingBox) -> float:

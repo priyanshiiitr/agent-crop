@@ -387,7 +387,7 @@ HTML_PAGE = """<!doctype html>
         }
 
         sessionInput.value = payload.session_id;
-        statusNode.textContent = `Completed in mode ${payload.mode}. Reward ${payload.reward.toFixed(3)}. Session ${payload.session_id}.`;
+        statusNode.textContent = `Completed in image mode ${payload.mode} with grounding ${payload.grounding_mode}. Reward ${payload.reward.toFixed(3)}. Session ${payload.session_id}.`;
         contextSummary.textContent = payload.folded_context.summary;
         renderPlanList(selectedPlan, [payload.selected_plan], true);
         renderPlanList(candidatePlans, payload.candidate_plans.slice(0, 4));
