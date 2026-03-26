@@ -206,7 +206,7 @@ class AgentBananaPipelineTests(unittest.TestCase):
 
             result = app.run(image, "Replace the center fruit with a banana and warm the background.")
 
-            self.assertEqual(result.mode, "mock-nano-banana")
+            self.assertEqual(result.mode, "mock")
             self.assertEqual(result.grounding_mode, "fake-vlm")
             self.assertEqual(len(result.step_results), 2)
             self.assertTrue(result.session_id)

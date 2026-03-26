@@ -162,6 +162,11 @@ class QualityMetrics:
     inside_change: float
     outside_change: float
     preview_alignment: float
+    seam_score: float = 0.0
+    seam_verdict: str = "accept"
+    semantic_score: float = 1.0
+    semantic_fulfilled: bool = True
+    semantic_reasoning: str = ""
     notes: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -171,6 +176,11 @@ class QualityMetrics:
             "inside_change": round(self.inside_change, 4),
             "outside_change": round(self.outside_change, 4),
             "preview_alignment": round(self.preview_alignment, 4),
+            "seam_score": round(self.seam_score, 4),
+            "seam_verdict": self.seam_verdict,
+            "semantic_score": round(self.semantic_score, 4),
+            "semantic_fulfilled": self.semantic_fulfilled,
+            "semantic_reasoning": self.semantic_reasoning,
             "notes": list(self.notes),
         }
 
@@ -193,6 +203,7 @@ class StepResult:
     llm_confidence: float = 0.0
     image_width: int = 0
     image_height: int = 0
+    agent_steps: List[Dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -212,6 +223,7 @@ class StepResult:
             "llm_confidence": round(self.llm_confidence, 4),
             "image_width": self.image_width,
             "image_height": self.image_height,
+            "agent_steps": list(self.agent_steps),
         }
 
 

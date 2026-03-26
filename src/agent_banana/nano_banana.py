@@ -9,7 +9,7 @@ from urllib import error, parse, request
 
 from PIL import Image
 
-DEFAULT_IMAGE_MODEL = "gemini-2.5-flash-image"
+DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 DEFAULT_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 

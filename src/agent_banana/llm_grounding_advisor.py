@@ -22,7 +22,7 @@ from PIL import Image
 from .models import BoundingBox
 
 # Use a text model for reasoning (cheaper + faster than image-gen model)
-DEFAULT_REASONING_MODEL = "gemini-2.5-flash-image"
+DEFAULT_REASONING_MODEL = "gemini-2.5-flash"
 DEFAULT_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 _ADVISOR_PROMPT = """\

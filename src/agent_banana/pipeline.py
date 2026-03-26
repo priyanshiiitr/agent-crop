@@ -30,6 +30,7 @@ from .vision import (
     paste_crop,
 )
 from .vlm_localizer import GroundingResult, MockVlmLocalizer, VlmLocalizer, build_localizer
+from .vlm_critic import VLMCritic, CriticVerdict
 
 
 class AgentBananaApp:
@@ -40,7 +41,7 @@ class AgentBananaApp:
         image_client: NanoBananaClient | None = None,
         localizer: VlmLocalizer | None = None,
         grounding_advisor: GroundingAdvisor | MockGroundingAdvisor | None = None,
-        max_retries: int = 1,
+        max_retries: int = 2,
     ):
         self.root = root
         artifacts_root = self.root / "artifacts" / "agent_banana"
@@ -54,6 +55,10 @@ class AgentBananaApp:
         self.planner = RLPlanner(RLValueStore(artifacts_root / "planner_values.json"))
         self.quality_judge = QualityJudge()
         self.max_retries = max_retries
+        # VLM Critic for semantic verification
+        import os
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        self.vlm_critic = VLMCritic(api_key=api_key) if api_key else None
 
     @classmethod
     def from_env(cls, root: Path | None = None) -> "AgentBananaApp":
@@ -135,37 +140,35 @@ class AgentBananaApp:
                     bbox = fallback_box_for_profile(current_image.size, target_profile)
 
             # ==============================================================
-            # ILD Step 2: CROP LOCAL PATCH with generous padding
+            # ILD Steps 2-5: ReAct Agent Loop
+            # (expand → crop → edit → blend → critic → retry if needed)
             # ==============================================================
-            # Generous padding so the edit model sees surrounding context,
-            # producing output that naturally matches the original.
-            pad = max(40, max(bbox.width, bbox.height) // 2)
-            edit_region = expand_box(bbox, pad, current_image.size)
-            local_crop = crop_box(current_image, edit_region)
-            print(f"[agent-banana] ILD: bbox {bbox.width}x{bbox.height} -> "
-                  f"edit_region {edit_region.width}x{edit_region.height} (pad={pad})")
+            from .react_executor import ReActExecutor
+            executor = ReActExecutor(
+                image_client=self.image_client,
+                quality_judge=self.quality_judge,
+                vlm_critic=self.vlm_critic,
+                max_attempts=self.max_retries + 1,  # +1 because first attempt isn't a "retry"
+            )
 
-            # ==============================================================
-            # ILD Step 3: EDIT LOCAL CROP (model acts as local inpainter)
-            # ==============================================================
-            local_prompt = self._local_edit_prompt(instruction, step, target_profile, edit.modifiers)
-            edited_response, proposal_mode = self._safe_full_image_edit(local_crop, local_prompt)
-            if proposal_mode != runtime_mode:
-                runtime_mode = proposal_mode
-            edited_crop = edited_response.image.convert("RGB").resize(local_crop.size)
-
-            # ==============================================================
-            # ILD Step 4: BLEND BACK using Laplacian pyramid blending
-            # ==============================================================
-            composed_image = paste_crop(current_image, edited_crop, edit_region)
-            quality = self.quality_judge.evaluate(
-                current_image,
-                composed_image,
-                bbox,
-                preview=composed_image,
+            agent_result = executor.execute_edit(
+                original_image=current_image,
+                instruction=instruction,
                 target=step.target,
                 verb=step.verb,
+                bbox=bbox,
+                target_profile=target_profile,
             )
+
+            composed_image = agent_result.final_image or current_image
+            quality = agent_result.quality or self.quality_judge.evaluate(
+                current_image, composed_image, bbox,
+                preview=composed_image, target=step.target, verb=step.verb,
+            )
+
+            print(f"[react] Completed in {agent_result.total_attempts} attempt(s), "
+                  f"{len(agent_result.steps)} steps, "
+                  f"{'SUCCESS' if agent_result.success else 'BEST-EFFORT'}")
 
             overlay_image = draw_bbox_overlay(current_image, bbox, step.target)
             step_results.append(
@@ -173,10 +176,12 @@ class AgentBananaApp:
                     step=step,
                     bbox=bbox,
                     quality=quality,
-                    preview_data_url=encode_png_data_url(local_crop),
+                    preview_data_url=encode_png_data_url(
+                        crop_box(current_image, expand_box(bbox, max(40, max(bbox.width, bbox.height)//2), current_image.size))
+                    ),
                     overlay_data_url=encode_png_data_url(overlay_image),
-                    edited_data_url=encode_png_data_url(composed_image),
-                    attempts=1,
+                    edited_data_url=agent_result.final_image_url,
+                    attempts=agent_result.total_attempts,
                     grounding_phrases=list(grounding_result.phrases),
                     grounding_candidates=ranked_candidates[:5],
                     localizer_mode=localizer_mode,
@@ -186,9 +191,12 @@ class AgentBananaApp:
                     llm_confidence=guidance.confidence if guidance else 0.0,
                     image_width=current_image.size[0],
                     image_height=current_image.size[1],
+                    agent_steps=[s.to_dict() for s in agent_result.steps],
                 )
             )
-            reward_components.append(quality.score)
+            # Reward: combine quality score with semantic score
+            semantic_multiplier = quality.semantic_score if quality.semantic_score < 0.7 else 1.0
+            reward_components.append(quality.score * semantic_multiplier)
             bboxes.append(bbox)
             current_image = composed_image
 

@@ -14,588 +14,647 @@ HTML_PAGE = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Agent Banana Studio</title>
+  <title>Moleculyst Studio</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0c0f13;
-      --surface: rgba(22, 27, 34, 0.85);
-      --surface-2: rgba(30, 37, 48, 0.7);
-      --border: rgba(99, 120, 150, 0.15);
-      --border-hi: rgba(99, 120, 150, 0.3);
-      --text: #e6edf3;
-      --text-dim: rgba(230, 237, 243, 0.6);
-      --text-muted: rgba(230, 237, 243, 0.4);
-      --accent: #58a6ff;
-      --green: #3fb950;
-      --amber: #d29922;
-      --purple: #bc8cff;
-      --red: #f85149;
-      --orange: #f0883e;
-      --radius: 16px;
-      --radius-sm: 10px;
+      --bg: #0d1117; --bg-sidebar: #161b22; --bg-chat: #0d1117;
+      --bg-user: #1f6feb; --bg-agent: #21262d; --bg-error: #3d1f1f;
+      --bg-tool: rgba(88,166,255,0.08); --bg-input: #161b22;
+      --border: #30363d; --border-hi: #484f58;
+      --text: #e6edf3; --text-dim: #8b949e; --text-muted: #6e7681;
+      --accent: #58a6ff; --green: #3fb950; --amber: #d29922;
+      --red: #f85149; --purple: #bc8cff; --orange: #f0883e;
+      --radius: 12px; --radius-sm: 8px;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      min-height: 100vh;
-      font-family: 'Inter', -apple-system, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      padding: 20px;
-      background-image:
-        radial-gradient(ellipse at 20% 0%, rgba(88,166,255,0.06), transparent 50%),
-        radial-gradient(ellipse at 80% 100%, rgba(188,140,255,0.04), transparent 50%);
-    }
-    .app { max-width: 1100px; margin: 0 auto; }
+    body { height: 100vh; font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); display: flex; overflow: hidden; }
 
-    .header {
-      display: flex; align-items: center; gap: 14px;
-      padding: 20px 0 24px;
-      border-bottom: 1px solid var(--border);
-      margin-bottom: 24px;
+    /* ── Sidebar ── */
+    .sidebar {
+      width: 260px; background: var(--bg-sidebar); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; flex-shrink: 0;
     }
-    .header-icon {
-      width: 42px; height: 42px; border-radius: 12px;
-      background: linear-gradient(135deg, var(--amber), var(--orange));
-      display: flex; align-items: center; justify-content: center;
-      font-size: 22px; flex-shrink: 0;
+    .sidebar-header {
+      padding: 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
     }
-    .header h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; }
-    .header p { color: var(--text-dim); font-size: 0.85rem; margin-top: 2px; }
+    .logo { width: 32px; height: 32px; border-radius: 8px; background: linear-gradient(135deg, var(--amber), var(--orange)); display: flex; align-items: center; justify-content: center; font-size: 18px; }
+    .sidebar-header h1 { font-size: 1rem; font-weight: 700; letter-spacing: -0.01em; }
+    .sidebar-section { padding: 12px 16px; }
+    .sidebar-section h3 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; }
+    .upload-btn {
+      width: 100%; padding: 10px; border: 1px dashed var(--border-hi); border-radius: var(--radius-sm);
+      background: transparent; color: var(--text-dim); cursor: pointer; font-size: 0.82rem;
+      transition: all 0.2s; text-align: center;
+    }
+    .upload-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .image-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .image-thumb {
+      width: 100%; border-radius: var(--radius-sm); object-fit: contain; max-height: 180px;
+      border: 2px solid transparent; cursor: pointer; transition: border 0.2s;
+    }
+    .image-thumb.active { border-color: var(--accent); }
+    .image-thumb:hover { border-color: var(--accent); opacity: 0.9; }
+    .sidebar-tools { flex: 1; overflow-y: auto; padding: 12px 16px; }
+    .sidebar-tools h3 { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 8px; font-weight: 600; }
+    .tool-item {
+      padding: 6px 8px; border-radius: 6px; font-size: 0.75rem; color: var(--text-dim);
+      font-family: 'JetBrains Mono', monospace; margin-bottom: 2px;
+    }
+    .tool-item:hover { background: rgba(255,255,255,0.04); }
 
-    .input-area {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 20px;
-      backdrop-filter: blur(16px);
-      margin-bottom: 24px;
-    }
-    .input-row { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: end; }
-    .input-group { display: grid; gap: 10px; }
-    .input-group label {
-      font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em;
-      color: var(--text-dim); font-weight: 600;
-    }
-    textarea, input[type="text"] {
-      width: 100%; border: 1px solid var(--border); border-radius: var(--radius-sm);
-      background: rgba(0,0,0,0.3); padding: 12px 14px; color: var(--text);
-      font: 0.9rem/1.5 'Inter', sans-serif; outline: none; transition: border 0.2s;
-    }
-    input[type="file"] { font: 0.85rem 'Inter', sans-serif; color: var(--text-dim); }
-    textarea { min-height: 70px; resize: vertical; }
-    textarea:focus, input[type="text"]:focus { border-color: var(--accent); }
-    .file-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    button, .btn {
-      border: 0; border-radius: var(--radius-sm); padding: 12px 24px; cursor: pointer;
-      font: 600 0.9rem 'Inter', sans-serif; transition: all 0.2s;
-      background: linear-gradient(135deg, var(--accent), #388bfd); color: #fff;
-      box-shadow: 0 4px 16px rgba(88,166,255,0.2); display: inline-block; text-align: center;
-    }
-    button:hover, .btn:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(88,166,255,0.3); }
-    button:disabled, .btn:disabled { opacity: 0.5; cursor: wait; transform: none; }
-    .btn-sm { padding: 8px 16px; font-size: 0.82rem; }
-    .btn-green { background: linear-gradient(135deg, var(--green), #2ea043); box-shadow: 0 4px 16px rgba(63,185,80,0.2); }
-    .btn-amber { background: linear-gradient(135deg, var(--amber), var(--orange)); box-shadow: 0 4px 16px rgba(210,153,34,0.2); }
+    /* ── Main area ── */
+    .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
-    .timeline { display: grid; gap: 0; }
-    .agent-step {
-      position: relative; padding-left: 40px; padding-bottom: 4px;
-      animation: fadeSlideIn 0.4s ease-out both;
+    /* Top bar */
+    .topbar {
+      padding: 10px 20px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--bg-sidebar);
     }
-    .agent-step::before {
-      content: ''; position: absolute; left: 15px; top: 32px; bottom: 0;
-      width: 2px; background: var(--border);
+    .topbar-title { font-size: 0.85rem; color: var(--text-dim); font-weight: 500; }
+    .stop-btn {
+      padding: 6px 16px; border-radius: 6px; border: 1px solid var(--red);
+      background: rgba(248,81,73,0.1); color: var(--red); font: 600 0.78rem 'Inter', sans-serif;
+      cursor: pointer; transition: all 0.2s; display: none;
     }
-    .agent-step:last-child::before { display: none; }
-    .step-dot {
-      position: absolute; left: 8px; top: 12px; width: 16px; height: 16px;
-      border-radius: 50%; border: 2px solid var(--border-hi);
-      background: var(--bg); z-index: 1;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .step-dot.active { border-color: var(--accent); background: rgba(88,166,255,0.15); }
-    .step-dot.done { border-color: var(--green); background: rgba(63,185,80,0.15); }
-    .step-dot.done::after { content: '\2713'; font-size: 9px; color: var(--green); }
-    .step-card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 16px; margin-bottom: 12px;
-      backdrop-filter: blur(12px); transition: border 0.3s;
-    }
-    .step-card:hover { border-color: var(--border-hi); }
-    .step-header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .step-label {
-      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.12em;
-      font-weight: 700; padding: 3px 8px; border-radius: 6px;
-    }
-    .step-label.planning { background: rgba(188,140,255,0.15); color: var(--purple); }
-    .step-label.preview { background: rgba(240,136,62,0.15); color: var(--orange); }
-    .step-label.llm { background: rgba(88,166,255,0.15); color: var(--accent); }
-    .step-label.grounding { background: rgba(63,185,80,0.15); color: var(--green); }
-    .step-label.compose { background: rgba(210,153,34,0.15); color: var(--amber); }
-    .step-title { font-weight: 600; font-size: 0.95rem; }
-    .step-body { color: var(--text-dim); font-size: 0.88rem; line-height: 1.6; }
+    .stop-btn:hover { background: rgba(248,81,73,0.2); }
+    .stop-btn.visible { display: inline-flex; align-items: center; gap: 6px; }
 
-    .llm-reasoning {
-      background: rgba(88,166,255,0.05); border: 1px solid rgba(88,166,255,0.15);
-      border-radius: var(--radius-sm); padding: 14px; margin-top: 10px;
-    }
-    .thinking-header {
-      display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
-      font-weight: 600; font-size: 0.85rem; color: var(--accent);
-    }
-    .llm-text {
-      font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;
-      color: var(--text); line-height: 1.7; white-space: pre-wrap;
-    }
-    .phrase-tag {
-      display: inline-block; padding: 3px 10px; border-radius: 20px;
-      background: rgba(88,166,255,0.1); border: 1px solid rgba(88,166,255,0.2);
-      font-size: 0.78rem; color: var(--accent); margin: 3px 4px 3px 0;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .confidence-bar {
-      height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06);
-      margin-top: 8px; overflow: hidden;
-    }
-    .confidence-fill { height: 100%; border-radius: 3px; transition: width 0.6s ease; }
+    /* Chat area */
+    .chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+    .chat::-webkit-scrollbar { width: 6px; }
+    .chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-    .image-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 12px; margin-top: 10px;
+    /* Chat bubbles */
+    .msg { display: flex; gap: 10px; max-width: 85%; animation: fadeIn 0.3s ease; }
+    .msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .msg.agent { align-self: flex-start; }
+
+    .msg-avatar {
+      width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; font-size: 14px;
     }
-    .img-card {
-      background: rgba(0,0,0,0.2); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); overflow: hidden;
+    .msg.user .msg-avatar { background: var(--bg-user); }
+    .msg.agent .msg-avatar { background: var(--border); }
+
+    .msg-body { display: flex; flex-direction: column; gap: 6px; }
+    .msg-sender { font-size: 0.7rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    .msg-bubble {
+      padding: 12px 16px; border-radius: var(--radius); font-size: 0.88rem; line-height: 1.55;
+      word-break: break-word;
     }
-    .img-card img { width: 100%; display: block; min-height: 160px; object-fit: contain; background: #111; }
-    .img-label {
-      padding: 8px 12px; font-size: 0.72rem; text-transform: uppercase;
-      letter-spacing: 0.1em; color: var(--text-muted); font-weight: 600;
-    }
-    .meta-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 8px; margin-top: 10px;
-    }
-    .meta-item { background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px 12px; }
-    .meta-key {
-      font-size: 0.68rem; text-transform: uppercase; color: var(--text-muted);
-      letter-spacing: 0.08em;
-    }
-    .meta-val { font-size: 0.9rem; font-weight: 600; margin-top: 2px; }
-    .quality-note {
-      font-size: 0.82rem; color: var(--text-dim); padding: 4px 0;
-      border-left: 2px solid var(--border-hi); padding-left: 10px; margin: 4px 0;
+    .msg.user .msg-bubble { background: var(--bg-user); border-bottom-right-radius: 4px; }
+    .msg.agent .msg-bubble { background: var(--bg-agent); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+    .msg.agent .msg-bubble.tool-call { background: var(--bg-tool); border-color: rgba(88,166,255,0.2); }
+    .msg.agent .msg-bubble.error { background: var(--bg-error); border-color: rgba(248,81,73,0.3); }
+
+    .tool-badge {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+      background: rgba(88,166,255,0.15); border-radius: 4px; font-size: 0.72rem;
+      font-family: 'JetBrains Mono', monospace; color: var(--accent); font-weight: 500;
     }
 
-    /* BBox editor */
-    .bbox-editor-wrap {
-      position: relative; display: inline-block; margin-top: 10px;
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      overflow: hidden; background: #111;
+    /* Images in chat */
+    .chat-images { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .chat-images img {
+      max-width: 300px; max-height: 250px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); cursor: pointer; transition: transform 0.2s;
     }
-    .bbox-editor-wrap img { display: block; max-width: 100%; }
-    .bbox-editor-wrap canvas {
-      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      cursor: crosshair;
+    .chat-images img:hover { transform: scale(1.02); }
+    .img-label { font-size: 0.7rem; color: var(--text-muted); text-align: center; margin-top: 2px; }
+
+    /* Quality metrics in chat */
+    .chat-metrics {
+      display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px;
+      padding: 8px 12px; background: rgba(0,0,0,0.2); border-radius: var(--radius-sm);
     }
-    .bbox-controls {
-      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
-      margin-top: 10px;
+    .metric { text-align: center; }
+    .metric .label { font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; }
+    .metric .value { font-size: 0.85rem; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+
+    /* BBox editor in chat */
+    .bbox-editor-card {
+      background: var(--bg-agent); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px; margin-top: 8px; max-width: 500px;
     }
+    .bbox-editor-card h4 { font-size: 0.78rem; color: var(--text-muted); font-weight: 600; margin-bottom: 8px; }
+    .bbox-editor-wrap { position: relative; display: inline-block; }
+    .bbox-editor-wrap img { max-width: 100%; border-radius: var(--radius-sm); display: block; }
+    .bbox-editor-wrap canvas { position: absolute; top: 0; left: 0; cursor: crosshair; }
+    .bbox-controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
     .bbox-coords {
-      font-family: 'JetBrains Mono', monospace; font-size: 0.78rem;
-      color: var(--text-dim); padding: 6px 10px;
-      background: rgba(0,0,0,0.3); border-radius: 6px;
+      font: 500 0.75rem 'JetBrains Mono', monospace; color: var(--text-dim);
+      padding: 4px 8px; background: rgba(0,0,0,0.3); border-radius: 4px;
     }
+    .bbox-input {
+      flex: 1; min-width: 180px; padding: 6px 10px; border-radius: 6px;
+      border: 1px solid var(--border); background: rgba(0,0,0,0.3);
+      color: var(--text); font-size: 0.82rem;
+    }
+    .bbox-input:focus { border-color: var(--accent); outline: none; }
 
-    @keyframes fadeSlideIn {
-      from { opacity: 0; transform: translateY(12px); }
-      to   { opacity: 1; transform: translateY(0); }
+    .btn {
+      border: 0; border-radius: 6px; padding: 8px 16px; cursor: pointer;
+      font: 600 0.82rem 'Inter', sans-serif; transition: all 0.2s; color: #fff;
     }
-    @media (max-width: 700px) {
-      body { padding: 10px; }
-      .input-row { grid-template-columns: 1fr; }
-      .file-row { grid-template-columns: 1fr; }
+    .btn-green { background: linear-gradient(135deg, var(--green), #2ea043); }
+    .btn-green:hover { transform: translateY(-1px); }
+    .btn-green:disabled { opacity: 0.5; cursor: wait; transform: none; }
+    .btn-blue { background: linear-gradient(135deg, var(--accent), #388bfd); }
+    .btn-red { background: linear-gradient(135deg, var(--red), #da3633); }
+
+    /* Input bar */
+    .input-bar {
+      padding: 12px 20px; border-top: 1px solid var(--border);
+      background: var(--bg-input); display: flex; gap: 10px; align-items: end;
     }
+    .input-bar-file {
+      width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--border);
+      background: transparent; color: var(--text-dim); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 18px;
+      transition: all 0.2s; flex-shrink: 0;
+    }
+    .input-bar-file:hover { border-color: var(--accent); color: var(--accent); }
+    .input-bar textarea {
+      flex: 1; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: rgba(0,0,0,0.3); padding: 8px 12px; color: var(--text);
+      font: 0.88rem/1.4 'Inter', sans-serif; resize: none; height: 36px; max-height: 120px;
+      outline: none; transition: border 0.2s;
+    }
+    .input-bar textarea:focus { border-color: var(--accent); }
+    .input-bar .send-btn {
+      width: 36px; height: 36px; border-radius: 8px; border: 0;
+      background: var(--accent); color: #fff; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 16px;
+      transition: all 0.2s; flex-shrink: 0;
+    }
+    .input-bar .send-btn:hover { background: #388bfd; }
+    .input-bar .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Typing indicator */
+    .typing { display: inline-flex; gap: 4px; padding: 8px 12px; }
+    .typing span {
+      width: 6px; height: 6px; background: var(--text-muted); border-radius: 50%;
+      animation: bounce 1.4s infinite ease-in-out;
+    }
+    .typing span:nth-child(1) { animation-delay: 0s; }
+    .typing span:nth-child(2) { animation-delay: 0.2s; }
+    .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+    @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Welcome */
+    .welcome {
+      flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: var(--text-dim); gap: 12px;
+    }
+    .welcome-icon { font-size: 48px; }
+    .welcome h2 { font-size: 1.2rem; font-weight: 700; color: var(--text); }
+    .welcome p { font-size: 0.88rem; max-width: 400px; text-align: center; line-height: 1.5; }
+
+    /* Hide file input */
+    input[type="file"] { display: none; }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header class="header">
-      <div class="header-icon">&#127820;</div>
-      <div>
-        <h1>Agent Banana Studio</h1>
-        <p>AI image editing agent &mdash; watch the reasoning steps unfold</p>
-      </div>
-    </header>
-
-    <section class="input-area">
-      <div class="input-group">
-        <div class="file-row">
-          <div>
-            <label>Image</label>
-            <input id="imageInput" type="file" accept="image/*">
-          </div>
-          <div>
-            <label>Session ID (optional)</label>
-            <input id="sessionId" type="text" placeholder="For multi-turn edits">
-          </div>
-        </div>
-        <label>Edit Instruction</label>
-        <div class="input-row">
-          <textarea id="instruction" placeholder="Describe what you want to change...">Remove the glasses from the table.</textarea>
-          <button id="runButton">Run Agent</button>
-        </div>
-      </div>
-    </section>
-
-    <div id="timeline" class="timeline"></div>
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">🍌</div>
+      <h1>Moleculyst</h1>
+    </div>
+    <div class="sidebar-section">
+      <h3>Images</h3>
+      <label class="upload-btn" for="sidebarFileInput">📎 Upload Image</label>
+      <input type="file" id="sidebarFileInput" accept="image/*">
+      <div class="image-list" id="imageList"></div>
+    </div>
+    <div class="sidebar-tools">
+      <h3>Tools</h3>
+      <div class="tool-item">🔍 ground_target</div>
+      <div class="tool-item">📐 expand_region</div>
+      <div class="tool-item">✂️ crop_local_patch</div>
+      <div class="tool-item">🎨 edit_local</div>
+      <div class="tool-item">🔗 blend_back</div>
+      <div class="tool-item">🔎 detect_seam</div>
+      <div class="tool-item">🔧 adjust_taper</div>
+      <div class="tool-item">📊 evaluate_quality</div>
+    </div>
   </div>
 
-  <script>
-    var imageInput = document.getElementById("imageInput");
-    var instructionInput = document.getElementById("instruction");
-    var sessionInput = document.getElementById("sessionId");
-    var runButton = document.getElementById("runButton");
-    var timeline = document.getElementById("timeline");
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <span class="topbar-title" id="sessionLabel">New Session</span>
+      <button class="stop-btn" id="stopBtn" onclick="handleStop()">■ Stop</button>
+    </div>
 
-    /* Stores for recompose */
-    var _lastSourcePayload = null;
-    var _iterCount = 0;
-    var _lastStepPreviews = {};
+    <div class="chat" id="chat">
+      <div class="welcome" id="welcome">
+        <div class="welcome-icon">🍌</div>
+        <h2>Moleculyst Studio</h2>
+        <p>Upload an image and describe what you'd like to edit. I'll show you my reasoning at every step.</p>
+      </div>
+    </div>
 
-    function dataUrlFromFile(file) {
-      return new Promise(function(resolve, reject) {
-        var reader = new FileReader();
-        reader.onload = function() { resolve(reader.result); };
-        reader.onerror = function() { reject(new Error("Failed to read image.")); };
-        reader.readAsDataURL(file);
+    <div class="input-bar">
+      <label class="input-bar-file" for="inputFile" title="Upload image">📎</label>
+      <input type="file" id="inputFile" accept="image/*">
+      <textarea id="userInput" placeholder="Describe your edit..." rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();handleSend();}"></textarea>
+      <button class="send-btn" id="sendBtn" onclick="handleSend()" title="Send">➤</button>
+    </div>
+  </div>
+
+<script>
+  var chat = document.getElementById("chat");
+  var welcome = document.getElementById("welcome");
+  var userInput = document.getElementById("userInput");
+  var sendBtn = document.getElementById("sendBtn");
+  var stopBtn = document.getElementById("stopBtn");
+  var inputFile = document.getElementById("inputFile");
+  var sidebarFile = document.getElementById("sidebarFileInput");
+  var imageList = document.getElementById("imageList");
+
+  var _sourcePayload = null;
+  var _images = [];
+  var _running = false;
+  var _iterCount = 0;
+  var _aborted = false;
+
+  function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+  function scrollToBottom() { chat.scrollTop = chat.scrollHeight; }
+
+  function addUserMsg(text, imgSrc) {
+    welcome.style.display = "none";
+    var html = '<div class="msg user"><div class="msg-avatar">👤</div><div class="msg-body">' +
+      '<div class="msg-sender">You</div><div class="msg-bubble">' + esc(text) + '</div>';
+    if (imgSrc) {
+      html += '<div class="chat-images"><div><img src="' + imgSrc + '" style="max-width:200px"><div class="img-label">Uploaded</div></div></div>';
+    }
+    html += '</div></div>';
+    chat.insertAdjacentHTML("beforeend", html);
+    scrollToBottom();
+  }
+
+  function addAgentMsg(text, extra) {
+    var html = '<div class="msg agent"><div class="msg-avatar">🍌</div><div class="msg-body">' +
+      '<div class="msg-sender">Moleculyst</div><div class="msg-bubble">' + text + '</div>';
+    if (extra) html += extra;
+    html += '</div></div>';
+    chat.insertAdjacentHTML("beforeend", html);
+    scrollToBottom();
+    return chat.lastElementChild;
+  }
+
+  function addToolMsg(toolName, thought, detail) {
+    var html = '<div class="msg agent"><div class="msg-avatar">🛠</div><div class="msg-body">' +
+      '<div class="msg-sender">Tool Call</div>' +
+      '<div class="msg-bubble tool-call">' +
+      '<div><span class="tool-badge">⚡ ' + esc(toolName) + '</span></div>' +
+      '<div style="margin-top:6px;color:var(--text-dim);font-size:0.82rem">💭 ' + esc(thought) + '</div>';
+    if (detail) html += '<div style="margin-top:6px">' + detail + '</div>';
+    html += '</div></div></div>';
+    chat.insertAdjacentHTML("beforeend", html);
+    scrollToBottom();
+  }
+
+  function addErrorMsg(text) {
+    addAgentMsg('<span style="color:var(--red)">⚠ ' + esc(text) + '</span>');
+  }
+
+  function addTyping() {
+    var html = '<div class="msg agent" id="typingIndicator"><div class="msg-avatar">🍌</div><div class="msg-body"><div class="typing"><span></span><span></span><span></span></div></div></div>';
+    chat.insertAdjacentHTML("beforeend", html);
+    scrollToBottom();
+  }
+  function removeTyping() { var el = document.getElementById("typingIndicator"); if (el) el.remove(); }
+
+  function addImageComparison(beforeSrc, afterSrc, beforeLabel, afterLabel) {
+    return '<div class="chat-images">' +
+      '<div><img src="' + beforeSrc + '"><div class="img-label">' + (beforeLabel || "Before") + '</div></div>' +
+      '<div><img src="' + afterSrc + '"><div class="img-label">' + (afterLabel || "After") + '</div></div>' +
+      '</div>';
+  }
+
+  function addMetrics(q) {
+    var seamColor = q.seam_verdict === "accept" ? "var(--green)" : q.seam_verdict === "warn" ? "var(--amber)" : "var(--red)";
+    var semColor = (q.semantic_score||1) >= 0.7 ? "var(--green)" : (q.semantic_score||1) >= 0.4 ? "var(--amber)" : "var(--red)";
+    var html = '<div class="chat-metrics">' +
+      '<div class="metric"><div class="label">Score</div><div class="value">' + (q.score||0).toFixed(3) + '</div></div>' +
+      '<div class="metric"><div class="label">Inside Δ</div><div class="value">' + (q.inside_change||0).toFixed(3) + '</div></div>' +
+      '<div class="metric"><div class="label">Outside Δ</div><div class="value">' + (q.outside_change||0).toFixed(3) + '</div></div>' +
+      '<div class="metric"><div class="label">Seam</div><div class="value" style="color:' + seamColor + '">' + (q.seam_score||0).toFixed(3) + ' ' + (q.seam_verdict||"") + '</div></div>' +
+      '<div class="metric"><div class="label">Semantic</div><div class="value" style="color:' + semColor + '">' + (q.semantic_score != null ? (q.semantic_score).toFixed(2) : "—") + ' ' + (q.semantic_fulfilled ? "✓" : "✗") + '</div></div>' +
+      '<div class="metric"><div class="label">Status</div><div class="value" style="color:' + (q.accepted ? "var(--green)" : "var(--red)") + '">' + (q.accepted ? "✓ Pass" : "✗ Fail") + '</div></div>' +
+      '</div>';
+    if (q.semantic_reasoning) {
+      html += '<div style="margin-top:6px;padding:8px 12px;background:rgba(0,0,0,0.2);border-radius:8px;font-size:0.8rem;color:var(--text-dim)">🧠 <strong>VLM Critic:</strong> ' + esc(q.semantic_reasoning) + '</div>';
+    }
+    return html;
+  }
+
+  function setRunning(v) {
+    _running = v;
+    sendBtn.disabled = v;
+    stopBtn.classList.toggle("visible", v);
+  }
+
+  function handleStop() {
+    _aborted = true;
+    setRunning(false);
+    removeTyping();
+    addAgentMsg("🛑 Stopped by user. You can give me new instructions.");
+  }
+
+  function dataUrlFromFile(file) {
+    return new Promise(function(resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function() { resolve(reader.result); };
+      reader.onerror = function() { reject(new Error("Failed to read")); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function addToSidebar(dataUrl) {
+    _images.push(dataUrl);
+    var img = document.createElement("img");
+    img.src = dataUrl;
+    img.className = "image-thumb active";
+    img.onclick = function() {
+      _sourcePayload = dataUrl;
+      document.querySelectorAll(".image-thumb").forEach(function(el) { el.classList.remove("active"); });
+      img.classList.add("active");
+    };
+    document.querySelectorAll(".image-thumb").forEach(function(el) { el.classList.remove("active"); });
+    imageList.appendChild(img);
+  }
+
+  // File upload handlers
+  inputFile.addEventListener("change", function(e) {
+    if (e.target.files[0]) {
+      dataUrlFromFile(e.target.files[0]).then(function(url) {
+        _sourcePayload = url;
+        addToSidebar(url);
+        welcome.style.display = "none";
+        addAgentMsg("📷 Image uploaded and ready for editing.", '<div class="chat-images"><div><img src="' + url + '" style="max-width:400px"><div class="img-label">Source Image</div></div></div>');
       });
     }
-
-    function esc(s) {
-      var d = document.createElement("div");
-      d.textContent = s;
-      return d.innerHTML;
+  });
+  sidebarFile.addEventListener("change", function(e) {
+    if (e.target.files[0]) {
+      dataUrlFromFile(e.target.files[0]).then(function(url) {
+        _sourcePayload = url;
+        addToSidebar(url);
+        welcome.style.display = "none";
+        addAgentMsg("📷 Image uploaded and ready for editing.", '<div class="chat-images"><div><img src="' + url + '" style="max-width:400px"><div class="img-label">Source Image</div></div></div>');
+      });
     }
+  });
 
-    function addStep(type, title, bodyHtml, dotClass) {
-      dotClass = dotClass || "done";
-      var step = document.createElement("div");
-      step.className = "agent-step";
-      step.style.animationDelay = (timeline.children.length * 0.08) + "s";
-      step.innerHTML =
-        '<div class="step-dot ' + dotClass + '"></div>' +
-        '<div class="step-card">' +
-          '<div class="step-header">' +
-            '<span class="step-label ' + type + '">' + type + '</span>' +
-            '<span class="step-title">' + title + '</span>' +
-          '</div>' +
-          '<div class="step-body">' + bodyHtml + '</div>' +
-        '</div>';
-      timeline.appendChild(step);
-      step.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      return step;
+  // Auto-resize textarea
+  userInput.addEventListener("input", function() {
+    this.style.height = "36px";
+    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+  });
+
+  function handleSend() {
+    var text = userInput.value.trim();
+    if (!text || _running) return;
+    if (!_sourcePayload) {
+      addAgentMsg("Please upload an image first using the 📎 button.");
+      return;
     }
+    userInput.value = "";
+    userInput.style.height = "36px";
+    _aborted = false;
 
-    function confColor(c) {
-      if (c >= 0.8) return "var(--green)";
-      if (c >= 0.5) return "var(--amber)";
-      return "var(--red)";
-    }
+    addUserMsg(text);
+    setRunning(true);
+    addTyping();
 
-    /* ---- Interactive BBox editor ---- */
-    function createBboxEditor(previewSrc, initBbox, imgW, imgH, stepIdx, stepData) {
-      var editorId = "bbox-editor-" + stepIdx;
-      var html =
-        '<div style="font-size:0.78rem;color:var(--text-muted);font-weight:600;margin-bottom:6px">ADJUST BOUNDING BOX</div>' +
-        '<div style="font-size:0.78rem;color:var(--text-dim);margin-bottom:8px">Click and drag to draw a new bounding box on the preview image, then click Re-compose.</div>' +
+    // Call the edit API
+    fetch("/api/edit", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ image: _sourcePayload, instruction: text })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      removeTyping();
+      if (_aborted) return;
+      if (data.error) { addErrorMsg(data.error); setRunning(false); return; }
+
+      var steps = data.step_results || [];
+      steps.forEach(function(sr, idx) {
+        // Grounding narration
+        var groundingText = "I'm looking for <strong>" + esc(sr.step.target) + "</strong>";
+        if (sr.grounding_phrases && sr.grounding_phrases.length) {
+          groundingText += " using phrases: " + sr.grounding_phrases.map(function(p) { return '"' + esc(p) + '"'; }).join(", ");
+        }
+        if (sr.llm_confidence > 0) {
+          groundingText += "<br>LLM confidence: <strong>" + sr.llm_confidence.toFixed(2) + "</strong>";
+        }
+        if (sr.llm_object_description) {
+          groundingText += "<br>Context: " + esc(sr.llm_object_description);
+        }
+        addToolMsg("ground_target", "Finding the target object", groundingText);
+
+        // Agent reasoning trace
+        var agentSteps = sr.agent_steps || [];
+        if (agentSteps.length > 0) {
+          agentSteps.forEach(function(as) {
+            var actionIcon = {
+              "expand_region": "📐", "crop_local_patch": "✂️",
+              "edit_local": "🎨", "blend_back": "��",
+              "evaluate_quality": "📊", "verify_semantic": "🧠",
+              "adjust_strategy": "🔧", "return_best": "🏁"
+            }[as.action] || "⚙️";
+
+            var detail = '<div style="font-size:0.82rem;color:var(--text-dim);margin-top:2px">💭 ' + esc(as.thought) + '</div>';
+            detail += '<div style="font-size:0.82rem;margin-top:2px">👁 ' + esc(as.observation) + '</div>';
+
+            if (as.critic_verdict) {
+              var cv = as.critic_verdict;
+              var cvColor = cv.fulfilled ? "var(--green)" : "var(--red)";
+              detail += '<div style="margin-top:4px;padding:6px 10px;background:rgba(0,0,0,0.2);border-radius:6px;border-left:3px solid ' + cvColor + '">';
+              detail += '<strong style="color:' + cvColor + '">' + (cv.fulfilled ? "✓ Approved" : "✗ Rejected") + '</strong>';
+              detail += ' (score: ' + (cv.semantic_score||0).toFixed(2) + ')';
+              detail += '<div style="font-size:0.78rem;color:var(--text-dim);margin-top:2px">' + esc(cv.reasoning) + '</div>';
+              if (cv.residual_objects && cv.residual_objects.length) {
+                detail += '<div style="font-size:0.78rem;color:var(--red);margin-top:2px">Still visible: ' + cv.residual_objects.map(esc).join(", ") + '</div>';
+              }
+              if (cv.suggestions && cv.suggestions.length) {
+                detail += '<div style="font-size:0.78rem;color:var(--amber);margin-top:2px">💡 ' + cv.suggestions.map(esc).join("; ") + '</div>';
+              }
+              detail += '</div>';
+            }
+
+            if (as.image_url) {
+              detail += '<div style="margin-top:6px"><img src="' + as.image_url + '" style="max-width:300px;border-radius:8px;border:1px solid var(--border)"></div>';
+            }
+
+            var durationStr = as.duration_ms ? " (" + (as.duration_ms/1000).toFixed(1) + "s)" : "";
+            addToolMsg(as.action, actionIcon + " " + as.action + durationStr, detail);
+          });
+        }
+
+        // Summary with quality metrics
+        var metrics = addMetrics(sr.quality);
+        var notes = (sr.quality.notes || []).map(function(n) { return '<div style="font-size:0.8rem;color:var(--text-dim);margin-top:4px">📝 ' + esc(n) + '</div>'; }).join("");
+        var attemptsTag = sr.attempts > 1 ? " (" + sr.attempts + " attempts)" : "";
+
+        addAgentMsg("✅ Step " + (idx+1) + " complete" + attemptsTag + " — <strong>" + esc(sr.step.prompt) + "</strong>", metrics + notes);
+      });
+
+      // Show final composed image FIRST (prominently)
+      if (data.final_image) {
+        addAgentMsg("🎨 <strong>Here is your edited image:</strong>",
+          '<div class="chat-images"><div><img src="' + data.final_image + '" style="max-width:500px;border-radius:12px"><div class="img-label">Final Result</div></div></div>');
+        _sourcePayload = data.final_image;
+        addToSidebar(data.final_image);
+      }
+
+      // THEN show bbox editor for further refinement
+      var lastSr = steps[steps.length - 1];
+      if (lastSr && data.final_image) {
+        addAgentMsg("Want to refine? Draw a bounding box below and re-compose:");
+        createBboxEditor(data.final_image, lastSr.bbox, lastSr.image_width || 512, lastSr.image_height || 512, 0, lastSr);
+      }
+      setRunning(false);
+    })
+    .catch(function(err) {
+      removeTyping();
+      addErrorMsg(err.message);
+      setRunning(false);
+    });
+  }
+
+  /* ── BBox Editor ── */
+  function createBboxEditor(previewSrc, initBbox, imgW, imgH, stepIdx, stepData) {
+    var editorId = "bbox-editor-" + stepIdx + "-" + _iterCount;
+    var card = document.createElement("div");
+    card.className = "msg agent";
+    card.innerHTML =
+      '<div class="msg-avatar">✏️</div><div class="msg-body"><div class="msg-sender">Adjust</div>' +
+      '<div class="bbox-editor-card">' +
+        '<h4>Draw a new bounding box and re-compose</h4>' +
         '<div class="bbox-editor-wrap" id="wrap-' + editorId + '">' +
-          '<img id="img-' + editorId + '" src="' + previewSrc + '" alt="Preview">' +
+          '<img id="img-' + editorId + '" src="' + previewSrc + '">' +
           '<canvas id="cvs-' + editorId + '"></canvas>' +
         '</div>' +
         '<div class="bbox-controls">' +
-          '<span class="bbox-coords" id="coords-' + editorId + '">' +
-            '[' + initBbox.left + ', ' + initBbox.top + '] \u2192 [' + initBbox.right + ', ' + initBbox.bottom + ']' +
-          '</span>' +
-          '<div style="margin-top:8px;display:flex;gap:8px;align-items:center">' +
-          '<input type="text" id="instr-' + editorId + '" placeholder="Custom instruction (e.g. fill with table texture)" ' +
-            'style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);font-size:0.82rem" />' +
-          '<button class="btn btn-sm btn-green" id="recomp-' + editorId + '">Re-compose</button>' +
+          '<span class="bbox-coords" id="coords-' + editorId + '">[' + initBbox.left + ',' + initBbox.top + '] → [' + initBbox.right + ',' + initBbox.bottom + ']</span>' +
+          '<input type="text" class="bbox-input" id="instr-' + editorId + '" placeholder="Custom instruction...">' +
+          '<button class="btn btn-green" id="recomp-' + editorId + '">Re-compose</button>' +
         '</div>' +
-        '</div>';
+      '</div></div>';
+    chat.appendChild(card);
+    scrollToBottom();
 
-      var wrapStep = addStep("grounding", "Edit Bounding Box (Step " + (stepIdx + 1) + ")", html);
+    setTimeout(function() {
+      var img = document.getElementById("img-" + editorId);
+      var cvs = document.getElementById("cvs-" + editorId);
+      var coordsEl = document.getElementById("coords-" + editorId);
+      var recompBtn = document.getElementById("recomp-" + editorId);
+      if (!img || !cvs) return;
 
-      /* Wait for image to load, then setup canvas */
-      setTimeout(function() {
-        var img = document.getElementById("img-" + editorId);
-        var cvs = document.getElementById("cvs-" + editorId);
-        var coordsEl = document.getElementById("coords-" + editorId);
-        var recompBtn = document.getElementById("recomp-" + editorId);
-        if (!img || !cvs) return;
+      function setup() {
+        var dispW = img.clientWidth, dispH = img.clientHeight;
+        cvs.width = dispW; cvs.height = dispH;
+        var scaleX = dispW / imgW, scaleY = dispH / imgH;
+        var ctx = cvs.getContext("2d");
+        var box = { x1: initBbox.left*scaleX, y1: initBbox.top*scaleY, x2: initBbox.right*scaleX, y2: initBbox.bottom*scaleY };
+        var drawing = false;
 
-        function setup() {
-          var dispW = img.clientWidth, dispH = img.clientHeight;
-          cvs.width = dispW; cvs.height = dispH;
-          var scaleX = dispW / imgW, scaleY = dispH / imgH;
-          var ctx = cvs.getContext("2d");
-
-          var box = {
-            x1: initBbox.left * scaleX, y1: initBbox.top * scaleY,
-            x2: initBbox.right * scaleX, y2: initBbox.bottom * scaleY
-          };
-          var drawing = false;
-
-          function drawBox() {
-            ctx.clearRect(0, 0, dispW, dispH);
-            ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2;
-            ctx.setLineDash([6, 3]);
-            ctx.strokeRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
-            /* semi-transparent fill */
-            ctx.fillStyle = "rgba(88,166,255,0.12)";
-            ctx.fillRect(box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1);
-            /* corner handles */
-            ctx.fillStyle = "#58a6ff";
-            [[box.x1,box.y1],[box.x2,box.y1],[box.x1,box.y2],[box.x2,box.y2]].forEach(function(pt) {
-              ctx.beginPath(); ctx.arc(pt[0], pt[1], 4, 0, Math.PI*2); ctx.fill();
-            });
-            /* update coords display in real image pixels */
-            var realBox = getRealBox();
-            coordsEl.textContent = '[' + realBox.left + ', ' + realBox.top + '] \u2192 [' + realBox.right + ', ' + realBox.bottom + '] (' + (realBox.right-realBox.left) + '\u00d7' + (realBox.bottom-realBox.top) + 'px)';
-          }
-
-          function getRealBox() {
-            var l = Math.round(Math.min(box.x1, box.x2) / scaleX);
-            var t = Math.round(Math.min(box.y1, box.y2) / scaleY);
-            var r = Math.round(Math.max(box.x1, box.x2) / scaleX);
-            var b = Math.round(Math.max(box.y1, box.y2) / scaleY);
-            return { left: Math.max(0,l), top: Math.max(0,t), right: Math.min(imgW,r), bottom: Math.min(imgH,b) };
-          }
-
-          cvs.addEventListener("mousedown", function(e) {
-            var rect = cvs.getBoundingClientRect();
-            box.x1 = e.clientX - rect.left; box.y1 = e.clientY - rect.top;
-            box.x2 = box.x1; box.y2 = box.y1;
-            drawing = true;
+        function drawBox() {
+          ctx.clearRect(0, 0, dispW, dispH);
+          ctx.strokeStyle = "#58a6ff"; ctx.lineWidth = 2; ctx.setLineDash([6,3]);
+          ctx.strokeRect(box.x1, box.y1, box.x2-box.x1, box.y2-box.y1);
+          ctx.fillStyle = "rgba(88,166,255,0.12)";
+          ctx.fillRect(box.x1, box.y1, box.x2-box.x1, box.y2-box.y1);
+          ctx.fillStyle = "#58a6ff";
+          [[box.x1,box.y1],[box.x2,box.y1],[box.x1,box.y2],[box.x2,box.y2]].forEach(function(pt) {
+            ctx.beginPath(); ctx.arc(pt[0], pt[1], 4, 0, Math.PI*2); ctx.fill();
           });
-          cvs.addEventListener("mousemove", function(e) {
-            if (!drawing) return;
-            var rect = cvs.getBoundingClientRect();
-            box.x2 = e.clientX - rect.left; box.y2 = e.clientY - rect.top;
-            drawBox();
-          });
-          cvs.addEventListener("mouseup", function() { drawing = false; });
-
-          recompBtn.addEventListener("click", function() {
-            var realBox = getRealBox();
-            if (realBox.right - realBox.left < 5 || realBox.bottom - realBox.top < 5) return;
-            recompBtn.disabled = true;
-            recompBtn.textContent = "Re-composing\u2026";
-            fetch("/api/recompose", {
-              method: "POST",
-              headers: {"Content-Type": "application/json"},
-              body: JSON.stringify({
-                source_image: _lastSourcePayload,
-                preview_image: _lastSourcePayload,
-                bbox: realBox,
-                target: stepData.step.target,
-                verb: stepData.step.verb,
-                custom_instruction: (document.getElementById("instr-" + editorId) || {}).value || "",
-              })
-            })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-              if (data.error) throw new Error(data.error);
-              var q = data.quality;
-              var statusColor = q.accepted ? "var(--green)" : "var(--red)";
-              var statusText = q.accepted ? "\u2713 Accepted" : "\u2717 Rejected";
-              var notesHtml = (q.notes || []).map(function(n) { return '<div class="quality-note">' + esc(n) + '</div>'; }).join("");
-              addStep("compose", "Re-composed with manual bbox",
-                '<div class="image-grid">' +
-                  '<div class="img-card"><img src="' + data.overlay_image + '" alt="Overlay"><div class="img-label">Adjusted Region</div></div>' +
-                  '<div class="img-card"><img src="' + data.final_image + '" alt="Result"><div class="img-label">New Output</div></div>' +
-                '</div>' +
-                '<div class="meta-grid">' +
-                  '<div class="meta-item"><div class="meta-key">Quality</div><div class="meta-val" style="color:' + statusColor + '">' + statusText + '</div></div>' +
-                  '<div class="meta-item"><div class="meta-key">Score</div><div class="meta-val">' + q.score.toFixed(3) + '</div></div>' +
-                  '<div class="meta-item"><div class="meta-key">Inside \u0394</div><div class="meta-val">' + q.inside_change.toFixed(3) + '</div></div>' +
-                  '<div class="meta-item"><div class="meta-key">Outside \u0394</div><div class="meta-val">' + q.outside_change.toFixed(3) + '</div></div>' +
-                  '<div class="meta-item"><div class="meta-key">BBox</div><div class="meta-val" style="font-size:0.72rem">' + data.bbox.left + ',' + data.bbox.top + ' \u2192 ' + data.bbox.right + ',' + data.bbox.bottom + '</div></div>' +
-                '</div>' +
-                (notesHtml ? '<div style="margin-top:8px">' + notesHtml + '</div>' : ''));
-              recompBtn.disabled = false;
-              recompBtn.textContent = "Re-compose";
-              /* Iterative loop: update source to new output and show a new bbox editor */
-              _lastSourcePayload = data.final_image;
-              _iterCount = (_iterCount || 0) + 1;
-              var newBbox = data.bbox;
-              createBboxEditor(data.final_image, newBbox, stepData.image_width || imgW, stepData.image_height || imgH, stepIdx + "_iter" + _iterCount, stepData);
-            })
-            .catch(function(err) {
-              addStep("compose", "Recompose Error", '<div style="color:var(--red)">' + esc(err.message) + '</div>');
-              recompBtn.disabled = false;
-              recompBtn.textContent = "Re-compose with this box";
-            });
-          });
-
-          drawBox();
+          var rb = getRealBox();
+          coordsEl.textContent = '[' + rb.left + ',' + rb.top + '] → [' + rb.right + ',' + rb.bottom + '] (' + (rb.right-rb.left) + '×' + (rb.bottom-rb.top) + 'px)';
         }
 
-        if (img.complete) { setup(); }
-        else { img.onload = setup; }
-      }, 100);
-    }
+        function getRealBox() {
+          var l=Math.round(Math.min(box.x1,box.x2)/scaleX), t=Math.round(Math.min(box.y1,box.y2)/scaleY);
+          var r=Math.round(Math.max(box.x1,box.x2)/scaleX), b=Math.round(Math.max(box.y1,box.y2)/scaleY);
+          return { left: Math.max(0,l), top: Math.max(0,t), right: Math.min(imgW,r), bottom: Math.min(imgH,b) };
+        }
 
-    /* ---- Main pipeline run ---- */
-    async function runPipeline() {
-      var file = imageInput.files[0];
-      var instruction = instructionInput.value.trim();
-      if (!file || !instruction) return;
-      runButton.disabled = true;
-      timeline.innerHTML = "";
-      _lastStepPreviews = {};
-
-      var imagePayload = await dataUrlFromFile(file);
-      _lastSourcePayload = imagePayload;
-
-      addStep("planning", "Received image & instruction",
-        '<div class="image-grid"><div class="img-card">' +
-        '<img src="' + imagePayload + '" alt="Source"><div class="img-label">Source Image</div></div></div>' +
-        '<div style="margin-top:10px"><strong>Instruction:</strong> <span style="color:var(--accent)">&quot;' + esc(instruction) + '&quot;</span></div>');
-
-      addStep("planning", "Parsing instruction & generating plan\u2026",
-        '<div style="color:var(--text-muted)">Decomposing edits, ranking candidate plans, selecting optimal path\u2026</div>', "active");
-
-      try {
-        var response = await fetch("/api/edit", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ image: imagePayload, instruction: instruction, session_id: sessionInput.value.trim() || null })
+        cvs.addEventListener("mousedown", function(e) {
+          var rect = cvs.getBoundingClientRect();
+          box.x1 = e.clientX-rect.left; box.y1 = e.clientY-rect.top;
+          box.x2 = box.x1; box.y2 = box.y1; drawing = true;
         });
-        var payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Request failed");
-        sessionInput.value = payload.session_id;
+        cvs.addEventListener("mousemove", function(e) {
+          if (!drawing) return;
+          var rect = cvs.getBoundingClientRect();
+          box.x2 = e.clientX-rect.left; box.y2 = e.clientY-rect.top;
+          drawBox();
+        });
+        cvs.addEventListener("mouseup", function() { drawing = false; });
 
-        timeline.removeChild(timeline.lastChild);
+        recompBtn.addEventListener("click", function() {
+          var realBox = getRealBox();
+          if (realBox.right-realBox.left < 5 || realBox.bottom-realBox.top < 5) return;
+          recompBtn.disabled = true; recompBtn.textContent = "Re-composing…";
+          addTyping();
 
-        var plan = payload.selected_plan;
-        var stepsHtml = plan.steps.map(function(s) {
-          return '<div style="padding:6px 0;border-bottom:1px solid var(--border)">' +
-            '<strong style="color:var(--purple)">' + s.order + '.</strong> ' + esc(s.verb) + ' <strong>' + esc(s.target) + '</strong>' +
-            '<span style="color:var(--text-muted);font-size:0.8rem;margin-left:8px">[' + s.mode + ']</span></div>';
-        }).join("");
-        addStep("planning", "Selected plan: " + plan.plan_id + " (score " + plan.score.toFixed(3) + ")",
-          stepsHtml +
-          '<div class="meta-grid">' +
-            '<div class="meta-item"><div class="meta-key">Candidates</div><div class="meta-val">' + payload.candidate_plans.length + '</div></div>' +
-            '<div class="meta-item"><div class="meta-key">Edits parsed</div><div class="meta-val">' + payload.parsed_edits.length + '</div></div>' +
-            '<div class="meta-item"><div class="meta-key">Session</div><div class="meta-val" style="font-size:0.72rem;word-break:break-all">' + payload.session_id.slice(0,12) + '\u2026</div></div>' +
-          '</div>');
+          fetch("/api/recompose", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              source_image: _sourcePayload,
+              preview_image: _sourcePayload,
+              bbox: realBox,
+              target: stepData.step.target,
+              verb: stepData.step.verb,
+              custom_instruction: (document.getElementById("instr-" + editorId) || {}).value || "",
+            })
+          })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            removeTyping();
+            if (data.error) { addErrorMsg(data.error); recompBtn.disabled = false; recompBtn.textContent = "Re-compose"; return; }
+            var q = data.quality;
+            var imgs = addImageComparison(data.overlay_image, data.final_image, "Region", "Result");
+            var metrics = addMetrics(q);
 
-        payload.step_results.forEach(function(sr, idx) {
-          var s = sr.step;
-          _lastStepPreviews[idx] = sr.preview_image;
+            addToolMsg("blend_back", "Re-composing with adjusted bounding box",
+              "BBox: " + data.bbox.left + "," + data.bbox.top + " → " + data.bbox.right + "," + data.bbox.bottom);
+            addAgentMsg("🔄 Re-composed result:", imgs + metrics);
 
-          /* Preview */
-          addStep("preview", "Preview: " + esc(s.verb) + " " + esc(s.target),
-            '<div class="image-grid"><div class="img-card">' +
-            '<img src="' + sr.preview_image + '" alt="Preview"><div class="img-label">Gemini Preview (before bbox)</div></div></div>' +
-            '<div style="margin-top:8px;font-size:0.82rem;color:var(--text-muted)">Mode: <strong style="color:var(--text)">' + esc(payload.mode) + '</strong></div>');
-
-          /* LLM Advisor */
-          if (sr.llm_object_description || (sr.llm_refined_phrases && sr.llm_refined_phrases.length > 0)) {
-            var phraseTags = (sr.llm_refined_phrases || []).map(function(p) {
-              return '<span class="phrase-tag">' + esc(p) + '</span>';
-            }).join("");
-            var bboxHtml = "";
-            if (sr.llm_bbox_hint) {
-              bboxHtml = '<div style="margin-top:8px;font-size:0.82rem">&#128205; <strong>Expected region:</strong> [' + sr.llm_bbox_hint.left + ', ' + sr.llm_bbox_hint.top + '] &rarr; [' + sr.llm_bbox_hint.right + ', ' + sr.llm_bbox_hint.bottom + '] (' + sr.llm_bbox_hint.width + '&times;' + sr.llm_bbox_hint.height + 'px)</div>';
-            }
-            var conf = sr.llm_confidence || 0;
-            addStep("llm", "LLM Grounding Advisor",
-              '<div class="llm-reasoning">' +
-                '<div class="thinking-header">&#129504; Spatial Reasoning</div>' +
-                '<div class="llm-text">' + esc(sr.llm_object_description || "No description returned.") + '</div>' +
-              '</div>' +
-              '<div style="margin-top:12px">' +
-                '<div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:6px;font-weight:600">REFINED GROUNDING PHRASES</div>' +
-                (phraseTags || '<span style="color:var(--text-muted);font-size:0.82rem">None generated</span>') +
-              '</div>' +
-              bboxHtml +
-              '<div style="margin-top:10px">' +
-                '<div style="font-size:0.78rem;color:var(--text-muted);display:flex;justify-content:space-between">' +
-                  '<span>CONFIDENCE</span>' +
-                  '<span style="color:' + confColor(conf) + ';font-weight:700">' + (conf * 100).toFixed(0) + '%</span>' +
-                '</div>' +
-                '<div class="confidence-bar"><div class="confidence-fill" style="width:' + (conf * 100) + '%;background:' + confColor(conf) + '"></div></div>' +
-              '</div>');
-          }
-
-          /* Grounding */
-          var candidates = sr.grounding_candidates || [];
-          var candHtml = candidates.slice(0, 3).map(function(c) {
-            return '<div style="padding:4px 0;font-size:0.82rem">' +
-              '<span class="phrase-tag" style="background:rgba(63,185,80,0.1);border-color:rgba(63,185,80,0.2);color:var(--green)">' + esc(c.phrase) + '</span> ' +
-              'score ' + c.score.toFixed(2) + ' &middot; [' + c.bbox.left + ',' + c.bbox.top + ',' + c.bbox.right + ',' + c.bbox.bottom + ']</div>';
-          }).join("");
-          if (!candHtml) candHtml = '<span style="color:var(--text-muted);font-size:0.82rem">No candidates found</span>';
-          var phrasesSent = (sr.grounding_phrases || []).map(function(p) {
-            return '<span class="phrase-tag" style="background:rgba(63,185,80,0.06);border-color:rgba(63,185,80,0.15);color:var(--green)">' + esc(p) + '</span>';
-          }).join("");
-          addStep("grounding", "Florence-2 Grounding",
-            '<div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px">Mode: <strong style="color:var(--text)">' + esc(sr.localizer_mode) + '</strong></div>' +
-            '<div style="margin-bottom:8px;font-size:0.78rem;color:var(--text-muted);font-weight:600">PHRASES SENT</div>' +
-            '<div>' + phrasesSent + '</div>' +
-            '<div style="margin-top:10px;font-size:0.78rem;color:var(--text-muted);font-weight:600">TOP CANDIDATES</div>' +
-            candHtml +
-            '<div class="image-grid" style="margin-top:10px"><div class="img-card">' +
-            '<img src="' + sr.overlay_image + '" alt="Overlay"><div class="img-label">Detected Region</div></div></div>');
-          /* Interactive BBox editor — inline between grounding and composition */
-          createBboxEditor(_lastSourcePayload, sr.bbox, sr.image_width || 512, sr.image_height || 512, idx, sr);
-
-          /* Composition */
-          var q = sr.quality;
-          var statusColor = q.accepted ? "var(--green)" : "var(--red)";
-          var statusText = q.accepted ? "\u2713 Accepted" : "\u2717 Rejected";
-          var notesHtml = (q.notes || []).map(function(n) { return '<div class="quality-note">' + esc(n) + '</div>'; }).join("");
-          addStep("compose", "Composed: " + esc(s.verb) + " " + esc(s.target),
-            '<div class="image-grid"><div class="img-card">' +
-            '<img src="' + sr.edited_image + '" alt="Result"><div class="img-label">Final Composition</div></div></div>' +
-            '<div class="meta-grid">' +
-              '<div class="meta-item"><div class="meta-key">Quality</div><div class="meta-val" style="color:' + statusColor + '">' + statusText + '</div></div>' +
-              '<div class="meta-item"><div class="meta-key">Score</div><div class="meta-val">' + q.score.toFixed(3) + '</div></div>' +
-              '<div class="meta-item"><div class="meta-key">Inside \u0394</div><div class="meta-val">' + q.inside_change.toFixed(3) + '</div></div>' +
-              '<div class="meta-item"><div class="meta-key">Outside \u0394</div><div class="meta-val">' + q.outside_change.toFixed(3) + '</div></div>' +
-              '<div class="meta-item"><div class="meta-key">Preview Align</div><div class="meta-val">' + q.preview_alignment.toFixed(3) + '</div></div>' +
-              '<div class="meta-item"><div class="meta-key">BBox</div><div class="meta-val" style="font-size:0.72rem">' + sr.bbox.left + ',' + sr.bbox.top + ' \u2192 ' + sr.bbox.right + ',' + sr.bbox.bottom + '</div></div>' +
-            '</div>' +
-            (notesHtml ? '<div style="margin-top:8px">' + notesHtml + '</div>' : ''));
+            _sourcePayload = data.final_image;
+            addToSidebar(data.final_image);
+            _iterCount++;
+            createBboxEditor(data.final_image, data.bbox, imgW, imgH, stepIdx + "_i" + _iterCount, stepData);
+            recompBtn.disabled = false; recompBtn.textContent = "Re-compose";
+          })
+          .catch(function(err) {
+            removeTyping();
+            addErrorMsg(err.message);
+            recompBtn.disabled = false; recompBtn.textContent = "Re-compose";
+          });
         });
 
-        /* Final summary */
-        addStep("compose", "Done \u2014 Reward " + payload.reward.toFixed(3),
-          '<div class="image-grid">' +
-            '<div class="img-card"><img src="' + payload.source_image + '" alt="Source"><div class="img-label">Original</div></div>' +
-            '<div class="img-card"><img src="' + payload.final_image + '" alt="Final"><div class="img-label">Final Output</div></div>' +
-          '</div>' +
-          '<div class="meta-grid" style="margin-top:12px">' +
-            '<div class="meta-item"><div class="meta-key">Image Mode</div><div class="meta-val">' + esc(payload.mode) + '</div></div>' +
-            '<div class="meta-item"><div class="meta-key">Grounding</div><div class="meta-val">' + esc(payload.grounding_mode) + '</div></div>' +
-            '<div class="meta-item"><div class="meta-key">Reward</div><div class="meta-val" style="color:var(--green)">' + payload.reward.toFixed(3) + '</div></div>' +
-            '<div class="meta-item"><div class="meta-key">Steps</div><div class="meta-val">' + payload.step_results.length + '</div></div>' +
-          '</div>');
-
-      } catch (err) {
-        addStep("compose", "Error", '<div style="color:var(--red)">' + esc(err.message) + '</div>');
-      } finally {
-        runButton.disabled = false;
+        drawBox();
       }
-    }
 
-    runButton.addEventListener("click", runPipeline);
-  </script>
+      if (img.complete) setup(); else img.onload = setup;
+    }, 100);
+  }
+</script>
 </body>
 </html>
 """
@@ -664,9 +723,9 @@ def make_handler(app: AgentBananaApp) -> Callable[..., BaseHTTPRequestHandler]:
                 verb = str(payload.get("verb", "edit"))
                 if not source_payload or not bbox_data:
                     self._send_json(400, {"error": "source_image and bbox are required"})
+                    return
                 if not preview_payload:
                     preview_payload = source_payload
-                    return
                 try:
                     source_image = decode_image_payload(source_payload)
                     preview_image = decode_image_payload(preview_payload)
