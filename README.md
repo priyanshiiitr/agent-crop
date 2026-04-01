@@ -1,4 +1,4 @@
-# 🍌 Moleculyst — Agentic Image Editing
+#  Moleculyst — Agentic Image Editing
 
 An agentic image editing pipeline inspired by the [Agent Banana paper](https://arxiv.org/abs/2602.09084) (arXiv:2602.09084). Implements **Image Layer Decomposition (ILD)** for high-fidelity, localized edits with seamless blending.
 
