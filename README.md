@@ -130,7 +130,7 @@ Compresses interaction history into structured memory across three levels:
 
 MIT
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [Agent Banana Paper](https://arxiv.org/abs/2602.09084) — Ye et al., 2026
 - [Florence-2](https://huggingface.co/microsoft/Florence-2-large) — Microsoft
