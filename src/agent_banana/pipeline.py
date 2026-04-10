@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Tuple
 
 from PIL import Image
+
+from .logging_config import log_function
 
 from .config import load_dotenv
 from .memory import ContextFolder, SessionStore
@@ -20,6 +23,7 @@ from .targeting import (
     rank_grounding_candidates,
     refine_bbox_for_profile,
     rerank_with_llm_guidance,
+    _corner_from_modifiers,
 )
 from .vision import (
     center_box,
@@ -31,6 +35,8 @@ from .vision import (
 )
 from .vlm_localizer import GroundingResult, MockVlmLocalizer, VlmLocalizer, build_localizer
 from .vlm_critic import VLMCritic, OllamaVLMCritic, HuggingFaceVLMCritic, CriticVerdict
+
+logger = logging.getLogger(__name__)
 
 
 class AgentBananaApp:
@@ -62,13 +68,13 @@ class AgentBananaApp:
         if critic_provider == "huggingface":
             hf_model = os.environ.get("HF_CRITIC_MODEL", "meta-llama/Llama-3.2-11B-Vision-Instruct")
             hf_token = os.environ.get("HF_API_TOKEN", "")
-            print(f"[pipeline] Booting Cloud VLM Critic via Hugging Face ({hf_model})...")
+            logger.info("Booting Cloud VLM Critic via Hugging Face (%s)...", hf_model)
             self.vlm_critic = HuggingFaceVLMCritic(api_token=hf_token, model=hf_model) if hf_token else None
             if not hf_token:
-                print("[pipeline] WARNING: HF_API_TOKEN not found! VLM Critic disabled.")
+                logger.warning("HF_API_TOKEN not found! VLM Critic disabled.")
         elif critic_provider == "ollama":
             ollama_model = os.environ.get("OLLAMA_CRITIC_MODEL", "llama3.2-vision")
-            print(f"[pipeline] Booting local VLM Critic via Ollama ({ollama_model})...")
+            logger.info("Booting local VLM Critic via Ollama (%s)...", ollama_model)
             self.vlm_critic = OllamaVLMCritic(model=ollama_model)
         else:
             api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -147,7 +153,8 @@ class AgentBananaApp:
                 elif guidance.expected_bbox_hint and guidance.confidence >= 0.6:
                     bbox = guidance.expected_bbox_hint
                 else:
-                    bbox = fallback_box_for_profile(current_image.size, target_profile)
+                    corner = _corner_from_modifiers(list(edit.modifiers or []), instruction)
+                    bbox = fallback_box_for_profile(current_image.size, target_profile, corner=corner)
 
             overlay_image = draw_bbox_overlay(current_image, bbox, step.target)
 
@@ -238,9 +245,9 @@ class AgentBananaApp:
                 preview=composed_image, target=step.target, verb=step.verb,
             )
 
-            print(f"[react] Completed in {agent_result.total_attempts} attempt(s), "
-                  f"{len(agent_result.steps)} steps, "
-                  f"{'SUCCESS' if agent_result.success else 'BEST-EFFORT'}")
+            logger.info("[react] Completed in %d attempt(s), %d steps, %s",
+                        agent_result.total_attempts, len(agent_result.steps),
+                        'SUCCESS' if agent_result.success else 'BEST-EFFORT')
 
             overlay_image = draw_bbox_overlay(current_image, bbox, step.target)
             step_results.append(
@@ -370,9 +377,10 @@ class AgentBananaApp:
                         bbox = raw_bbox
                 elif guidance.expected_bbox_hint and guidance.confidence >= 0.6:
                     bbox = guidance.expected_bbox_hint
-                    print(f"[agent-banana] Using LLM bbox hint as fallback (confidence={guidance.confidence:.2f})")
+                    logger.info("Using LLM bbox hint as fallback (confidence=%.2f)", guidance.confidence)
                 else:
-                    bbox = fallback_box_for_profile(current_image.size, target_profile)
+                    corner = _corner_from_modifiers(list(edit.modifiers or []), instruction)
+                    bbox = fallback_box_for_profile(current_image.size, target_profile, corner=corner)
 
             # ==============================================================
             # ILD Steps 2-5: ReAct Agent Loop
@@ -402,9 +410,9 @@ class AgentBananaApp:
                 preview=composed_image, target=step.target, verb=step.verb,
             )
 
-            print(f"[react] Completed in {agent_result.total_attempts} attempt(s), "
-                  f"{len(agent_result.steps)} steps, "
-                  f"{'SUCCESS' if agent_result.success else 'BEST-EFFORT'}")
+            logger.info("[react] Completed in %d attempt(s), %d steps, %s",
+                        agent_result.total_attempts, len(agent_result.steps),
+                        'SUCCESS' if agent_result.success else 'BEST-EFFORT')
 
             overlay_image = draw_bbox_overlay(current_image, bbox, step.target)
             step_results.append(
@@ -469,7 +477,7 @@ class AgentBananaApp:
         try:
             return self.image_client.edit_full_image(image, prompt), self.image_client.mode_label()
         except Exception as exc:
-            print(f"[agent-banana] image_client failed, falling back to mock: {exc}")
+            logger.warning("image_client failed, falling back to mock: %s", exc)
             return self.fallback_image_client.edit_full_image(image, prompt), "mock-fallback"
 
     def _safe_localize(self, image: Image.Image, phrases: list[str], profile: str):
@@ -575,8 +583,8 @@ class AgentBananaApp:
                 f"same colors, lighting, textures, and positions. "
                 f"The result must blend naturally with its surroundings."
             )
-        print(f"[agent-banana] recompose ILD: bbox {bbox.width}x{bbox.height} -> "
-              f"edit_region {edit_region.width}x{edit_region.height} (pad={pad})")
+        logger.info("recompose ILD: bbox %dx%d -> edit_region %dx%d (pad=%d)",
+                    bbox.width, bbox.height, edit_region.width, edit_region.height, pad)
         edited_response, _ = self._safe_full_image_edit(local_crop, local_prompt)
         edited_crop = edited_response.image.convert("RGB").resize(local_crop.size)
         composed = paste_crop(src, edited_crop, edit_region)

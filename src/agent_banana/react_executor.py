@@ -20,6 +20,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
 import time
@@ -29,12 +30,15 @@ from urllib import error, parse, request
 
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox, QualityMetrics
 from .quality import QualityJudge
 from .seam_detector import boundary_penalty
 from .tool_registry import ToolRegistry, build_tool_registry
 from .vlm_critic import VLMCritic, CriticVerdict
 from .vision import crop_box, expand_box, paste_crop, encode_png_data_url, center_box
+
+logger = logging.getLogger(__name__)
 
 
 # ─── Default orchestrator model ───
@@ -108,16 +112,16 @@ Analyze the image carefully before deciding your next action.
 ## Available Tools
 {tools_desc}
 
-## Rules
+## Rules — FOLLOW THIS EXACT SEQUENCE, NO SKIPPING
 1. LOOK at the attached image — the RED rectangle marks the bounding box region
-2. ALWAYS start with expand_region to add context padding around the bbox
-3. Then crop_local_patch to get the local region
-4. Then edit_local to apply the edit
-5. Then blend_back to merge the edit into the full image
-6. Then evaluate_quality to check the result
-7. If quality is poor or seam is detected, use detect_seam and adjust_taper
-8. Call finish when the edit looks good
-9. Use what you SEE in the image to make better decisions about parameters
+2. ALWAYS call expand_region FIRST
+3. ALWAYS call crop_local_patch SECOND
+4. ALWAYS call edit_local THIRD — this is where the actual edit happens
+5. ALWAYS call blend_back FOURTH — merge the edit into the full image
+6. ALWAYS call evaluate_quality FIFTH
+7. Only call finish AFTER blend_back and evaluate_quality are done
+8. Do NOT call finish, verify_semantic, or ground_target before completing steps 2-6
+9. If quality is poor, use detect_seam and adjust_taper, then finish
 
 ## Previous Steps
 {scratchpad}
@@ -436,15 +440,15 @@ class ReActExecutor:
                         quality.notes.append(
                             f"Still visible: {', '.join(critic_verdict.residual_objects)}"
                         )
-                    print(f"[react] Attempt {attempt} REJECTED "
-                          f"(semantic={critic_verdict.semantic_score:.2f})")
+                    logger.warning("Attempt %d REJECTED (semantic=%.2f)",
+                                   attempt, critic_verdict.semantic_score)
                 else:
                     quality.notes.append(
                         f"[Attempt {attempt}] VLM APPROVED "
                         f"(semantic={critic_verdict.semantic_score:.2f})"
                     )
-                    print(f"[react] Attempt {attempt} APPROVED "
-                          f"(semantic={critic_verdict.semantic_score:.2f})")
+                    logger.info("Attempt %d APPROVED (semantic=%.2f)",
+                                attempt, critic_verdict.semantic_score)
 
             # ─── Track best result ───
             combined_score = quality.score * quality.semantic_score
@@ -557,7 +561,7 @@ class ReActExecutor:
                     step_callback=step_callback,
                 )
             except Exception as exc:
-                print(f"[react] VLM-driven attempt failed ({exc}), falling back to deterministic")
+                logger.warning("VLM-driven attempt failed (%s), falling back to deterministic", exc)
 
         return self._deterministic_attempt(
             working_image, untouched_original, instruction,
@@ -648,8 +652,8 @@ class ReActExecutor:
             # ─── Parse the VLM's decision ───
             parsed = _parse_llm_action(vlm_response)
             if not parsed:
-                print(f"[react] VLM response unparseable at step {loop_step + 1}, "
-                      f"falling back to deterministic")
+                logger.warning("VLM response unparseable at step %d, falling back to deterministic",
+                               loop_step + 1)
                 # Fall back to deterministic for remaining steps
                 det_steps, composed, quality, success = self._deterministic_attempt(
                     state["composed"] or working_image,
@@ -665,6 +669,15 @@ class ReActExecutor:
 
             # ─── Handle 'finish' action ───
             if action_name == "finish":
+                # If no edit was performed yet, force the pipeline first
+                if state.get("composed") is None:
+                    forced = self._force_remaining_pipeline(
+                        state, working_image, untouched_original,
+                        instruction, target, verb, attempt, step_num,
+                        _emit,
+                    )
+                    steps.extend(forced[0])
+                    return steps, forced[1], forced[2], False
                 composed = state.get("composed") or working_image
                 quality = state.get("quality")
                 steps.append(AgentStep(
@@ -712,7 +725,16 @@ class ReActExecutor:
                 f"  Observation: {observation[:200]}"
             )
 
-        # Max steps reached for this attempt
+        # Max steps reached — if the edit pipeline never completed, force it now
+        if state.get("composed") is None:
+            forced = self._force_remaining_pipeline(
+                state, working_image, untouched_original,
+                instruction, target, verb, attempt, step_num,
+                _emit,
+            )
+            steps.extend(forced[0])
+            return steps, forced[1], forced[2], False
+
         composed = state.get("composed") or working_image
         quality = state.get("quality")
         return steps, composed, quality, False
@@ -852,6 +874,81 @@ class ReActExecutor:
 
         else:
             return f"Unknown tool: {action_name}. Use one of the available tools.", {}
+
+    def _force_remaining_pipeline(
+        self,
+        state: dict,
+        working_image: Image.Image,
+        untouched_original: Image.Image,
+        instruction: str,
+        target: str,
+        verb: str,
+        attempt: int,
+        step_num: int,
+        emit,
+    ) -> tuple:
+        """Force the mandatory crop→edit→blend→evaluate sequence when the VLM skipped it."""
+        steps = []
+        bbox = state["bbox"]
+
+        # Ensure we have an edit_region
+        if state.get("edit_region") is None:
+            padding_ratio = 0.5 + (attempt - 1) * 0.25
+            pad = max(40, int(max(bbox.width, bbox.height) * padding_ratio))
+            state["edit_region"] = expand_box(bbox, pad, working_image.size)
+
+        edit_region = state["edit_region"]
+
+        # Crop
+        step_num += 1
+        local_crop = crop_box(working_image, edit_region)
+        state["local_crop"] = local_crop
+        s = AgentStep(step_num=step_num, thought="Forcing crop (VLM skipped pipeline).",
+                      action="crop_local_patch", params={},
+                      observation=f"Cropped {local_crop.size[0]}x{local_crop.size[1]} from working image")
+        steps.append(s); emit(s)
+
+        # Edit
+        step_num += 1
+        prompt = self._build_prompt(instruction, target, verb, attempt)
+        try:
+            edited_response = self.image_client.edit_full_image(local_crop, prompt)
+            edited_crop = edited_response.image.convert("RGB").resize(local_crop.size)
+            state["edited_crop"] = edited_crop
+            obs = f"Gemini returned {edited_crop.size[0]}x{edited_crop.size[1]} edit (attempt {attempt})"
+            img_url = encode_png_data_url(edited_crop)
+        except Exception as exc:
+            edited_crop = local_crop
+            obs = f"Edit failed: {exc}"
+            img_url = ""
+        s = AgentStep(step_num=step_num, thought="Applying edit.", action="edit_local",
+                      params={}, observation=obs, image_url=img_url)
+        steps.append(s); emit(s)
+
+        # Blend
+        step_num += 1
+        composed = paste_crop(working_image, edited_crop, edit_region)
+        state["composed"] = composed
+        img_url = encode_png_data_url(composed)
+        s = AgentStep(step_num=step_num, thought="Blending edited crop back.", action="blend_back",
+                      params={}, observation=f"Blended {edit_region.width}x{edit_region.height} region",
+                      image_url=img_url)
+        steps.append(s); emit(s)
+
+        # Evaluate
+        step_num += 1
+        quality = self.quality_judge.evaluate(
+            untouched_original, composed, bbox,
+            preview=composed, target=target, verb=verb,
+        )
+        state["quality"] = quality
+        s = AgentStep(step_num=step_num, thought="Evaluating quality.", action="evaluate_quality",
+                      params={}, observation=(
+                          f"Score={quality.score:.3f}, seam={quality.seam_verdict}, "
+                          f"inside_Δ={quality.inside_change:.3f}, outside_Δ={quality.outside_change:.3f}"))
+        steps.append(s); emit(s)
+
+        return steps, composed, quality
 
     def _deterministic_attempt(
         self,

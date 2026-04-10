@@ -7,14 +7,18 @@ The ReAct executor selects tools via LLM reasoning (Thought → Action → Obser
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox
 from .vision import crop_box, expand_box, paste_crop, draw_bbox_overlay, encode_png_data_url
 from .seam_detector import boundary_penalty
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -104,9 +108,11 @@ class ToolRegistry:
             result = tool.fn(**tool_call.params)
             tool_call.result = result
             tool_call.status = "success"
+            logger.debug("Tool '%s' succeeded", tool_call.tool_name)
         except Exception as exc:
             tool_call.error = str(exc)
             tool_call.status = "failed"
+            logger.error("Tool '%s' FAILED: %s", tool_call.tool_name, exc)
 
         return tool_call
 
@@ -178,13 +184,24 @@ def _tool_edit_local(crop: Image.Image, instruction: str, target: str,
     if image_client is None:
         return {"error": "No image client available"}
 
-    prompt = (
-        f"This is a cropped region from a larger image. "
-        f"{instruction} "
-        f"Keep everything else EXACTLY the same — "
-        f"same colors, lighting, textures, and positions. "
-        f"The result must blend naturally with its surroundings."
-    )
+    verb = instruction.strip().split()[0].lower() if instruction.strip() else ""
+    is_removal = verb in {"remove", "delete", "erase", "eliminate", "hide"}
+
+    if is_removal:
+        prompt = (
+            f"Edit this image: {instruction}. "
+            f"The {target} must be COMPLETELY GONE from the result — do not leave any trace of it. "
+            f"Fill the area where it was with realistic background: match the surrounding "
+            f"grass, ground, sky, or environment texture seamlessly. "
+            f"All other objects and the background outside the removed area must remain unchanged."
+        )
+    else:
+        prompt = (
+            f"Edit this image crop: {instruction}. "
+            f"Keep all other elements exactly as they appear — "
+            f"same colors, lighting, textures, and positions. "
+            f"The result must blend naturally with its surroundings."
+        )
 
     response = image_client.edit_full_image(crop, prompt)
     edited = response.image.convert("RGB").resize(crop.size)

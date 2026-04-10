@@ -3,12 +3,16 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 from dataclasses import dataclass
 from urllib import error, parse, request
 
 from PIL import Image
 
+from .logging_config import log_function
+
+logger = logging.getLogger(__name__)
 DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image-preview"
 DEFAULT_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
@@ -23,16 +27,19 @@ class GeminiResponse:
     text: str
 
 
+@log_function
 def _image_to_png_bytes(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
     image.convert("RGB").save(buffer, format="PNG")
     return buffer.getvalue()
 
 
+@log_function
 def _decode_image(encoded: str) -> Image.Image:
     return Image.open(io.BytesIO(base64.b64decode(encoded))).convert("RGB")
 
 
+@log_function
 def call_gemini(
     prompt: str,
     image: Image.Image,
@@ -66,7 +73,7 @@ def call_gemini(
             "responseModalities": ["TEXT", "IMAGE"],
             "temperature": 0.4,
             "topP": 0.9,
-            "maxOutputTokens": 512,
+            "maxOutputTokens": 8192,
         },
     }
 
@@ -85,8 +92,10 @@ def call_gemini(
             raw = resp.read().decode("utf-8")
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        logger.error("Gemini HTTP %d: %s", exc.code, detail[:500])
         raise GeminiError(f"HTTP {exc.code}: {detail}") from exc
     except error.URLError as exc:
+        logger.error("Gemini request failed: %s", exc.reason)
         raise GeminiError(f"Request failed: {exc.reason}") from exc
 
     data = json.loads(raw)
@@ -136,6 +145,7 @@ class _GeminiClientShim(NanoBananaClient):
                            api_base=self.api_base, timeout=self.timeout_seconds)
 
 
+@log_function
 def build_image_client() -> NanoBananaClient:
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if api_key:

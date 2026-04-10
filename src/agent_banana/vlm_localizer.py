@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import List, Optional
 
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox, GroundingCandidate
 from .targeting import classify_target, fallback_box_for_profile
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_GROUNDING_MODEL = "florence-community/Florence-2-base"
 
@@ -186,6 +190,7 @@ class MockVlmLocalizer(VlmLocalizer):
         )
 
 
+@log_function
 def build_localizer() -> VlmLocalizer:
     localizer = Florence2PhraseGrounder.from_env()
     if localizer is None:

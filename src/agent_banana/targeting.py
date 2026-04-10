@@ -1,15 +1,21 @@
 from __future__ import annotations
 
+import logging
 import re
 
+from .logging_config import log_function
 from .models import BoundingBox, GroundingCandidate
+
+logger = logging.getLogger(__name__)
 
 FACE_ACCESSORY_KEYWORDS = {"glasses", "eyeglasses", "spectacles", "sunglasses", "goggles", "frames", "eyewear"}
 HEAD_ACCESSORY_KEYWORDS = {"hat", "cap", "helmet", "headband", "tiara", "veil"}
 SMALL_ACCESSORY_KEYWORDS = {"earring", "earrings", "ring", "bracelet", "watch", "necklace", "pendant", "brooch"}
 GLOBAL_KEYWORDS = {"background", "scene", "lighting", "style", "mood", "whole image", "entire image"}
+WATERMARK_KEYWORDS = {"logo", "watermark", "badge", "stamp", "overlay", "text overlay", "brand", "copyright", "credit", "label"}
 
 
+@log_function
 def classify_target(target: str, verb: str = "") -> str:
     lowered = f"{verb} {target}".lower()
     if any(keyword in lowered for keyword in FACE_ACCESSORY_KEYWORDS):
@@ -20,7 +26,31 @@ def classify_target(target: str, verb: str = "") -> str:
         return "small_accessory"
     if any(keyword in lowered for keyword in GLOBAL_KEYWORDS):
         return "global_region"
+    if any(keyword in lowered for keyword in WATERMARK_KEYWORDS):
+        return "watermark"
     return "generic_local"
+
+
+def _corner_from_modifiers(modifiers: list[str], instruction: str = "") -> str | None:
+    """Extract corner hint from spatial modifiers or instruction text."""
+    text = " ".join(modifiers + [instruction]).lower()
+    bottom = "bottom" in text or "lower" in text
+    top = "top" in text or "upper" in text
+    left = "left" in text
+    right = "right" in text
+    if bottom and left:
+        return "bottom_left"
+    if bottom and right:
+        return "bottom_right"
+    if top and left:
+        return "top_left"
+    if top and right:
+        return "top_right"
+    if bottom:
+        return "bottom_center"
+    if top:
+        return "top_center"
+    return None
 
 
 def _clean_phrase(phrase: str) -> str:
@@ -45,6 +75,7 @@ def _clean_phrase(phrase: str) -> str:
     return phrase
 
 
+@log_function
 def grounding_phrases_for_target(target: str, modifiers: list[str], verb: str) -> list[str]:
     phrases: list[str] = []
     lowered_target = target.lower().strip()
@@ -112,7 +143,8 @@ def ideal_change_range(profile: str) -> tuple[float, float]:
     }.get(profile, (0.03, 0.55))
 
 
-def fallback_box_for_profile(image_size: tuple[int, int], profile: str) -> BoundingBox:
+def fallback_box_for_profile(image_size: tuple[int, int], profile: str,
+                             corner: str | None = None) -> BoundingBox:
     width, height = image_size
     if profile == "face_accessory":
         box_width = max(56, int(width * 0.22))
@@ -132,9 +164,23 @@ def fallback_box_for_profile(image_size: tuple[int, int], profile: str) -> Bound
         center_x = width // 2
         center_y = int(height * 0.42)
         return box_from_center(center_x, center_y, box_width, box_height, image_size)
+    if profile == "watermark":
+        bw = max(48, int(width * 0.18))
+        bh = max(32, int(height * 0.12))
+        corner_map = {
+            "bottom_left":   (int(bw * 0.55), height - int(bh * 0.55)),
+            "bottom_right":  (width - int(bw * 0.55), height - int(bh * 0.55)),
+            "top_left":      (int(bw * 0.55), int(bh * 0.55)),
+            "top_right":     (width - int(bw * 0.55), int(bh * 0.55)),
+            "bottom_center": (width // 2, height - int(bh * 0.55)),
+            "top_center":    (width // 2, int(bh * 0.55)),
+        }
+        cx, cy = corner_map.get(corner or "bottom_left", corner_map["bottom_left"])
+        return box_from_center(cx, cy, bw, bh, image_size)
     return box_from_center(width // 2, height // 2, max(64, int(width * 0.38)), max(64, int(height * 0.38)), image_size)
 
 
+@log_function
 def rank_grounding_candidates(
     candidates: list[GroundingCandidate],
     image_size: tuple[int, int],
@@ -162,6 +208,7 @@ def rank_grounding_candidates(
     return sorted(candidates, key=candidate_score, reverse=True)
 
 
+@log_function
 def refine_bbox_for_profile(
     candidate: BoundingBox | None,
     image_size: tuple[int, int],
@@ -228,6 +275,7 @@ def bbox_iou(a: BoundingBox, b: BoundingBox) -> float:
     return inter / union if union > 0 else 0.0
 
 
+@log_function
 def rerank_with_llm_guidance(
     candidates: list[GroundingCandidate],
     guidance_bbox: BoundingBox,

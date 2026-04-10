@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 from PIL import Image
 
+from .logging_config import setup_logging
 from .pipeline import AgentBananaApp
 from .vision import decode_image_payload, save_png
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -24,6 +28,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    setup_logging(level="DEBUG")
+
     app = AgentBananaApp.from_env(default_root)
     image = Image.open(args.image).convert("RGB")
     result = app.run(image, args.instruction, session_id=args.session_id)
@@ -38,10 +44,10 @@ def main() -> None:
 
     report_path = args.output_dir / "report.json"
     report_path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
-    print(f"Session: {result.session_id}")
-    print(f"Runtime mode: {result.mode}")
-    print(f"Reward: {result.reward:.3f}")
-    print(f"Artifacts written to {args.output_dir}")
+    logger.info("Session: %s", result.session_id)
+    logger.info("Runtime mode: %s", result.mode)
+    logger.info("Reward: %.3f", result.reward)
+    logger.info("Artifacts written to %s", args.output_dir)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -19,6 +20,10 @@ from typing import List, Optional
 from urllib import error, parse, request
 
 from PIL import Image
+
+from .logging_config import log_function
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -178,10 +183,10 @@ class VLMCritic:
             parts_out = candidates[0].get("content", {}).get("parts", [])
             response_text = "".join(p.get("text", "") for p in parts_out)
 
-            print(f"[vlm-critic] Raw response: {response_text[:500]}")
+            logger.info("Raw response: %s", response_text[:500])
             return self._parse_response(response_text, instruction, target)
         except Exception as exc:
-            print(f"[vlm-critic] Error: {exc}")
+            logger.error("VLM Critic error: %s", exc)
             return CriticVerdict(
                 fulfilled=False,  # Error = NOT approved, trigger retry
                 confidence=0.0,
@@ -232,7 +237,7 @@ class VLMCritic:
             pass
 
         # Try 3: Heuristic extraction from raw text
-        print(f"[vlm-critic] Parse failed, raw: {text[:300]}")
+        logger.warning("VLM Critic parse failed, raw: %s", text[:300])
         # Look for score-like patterns
         score = 0.4
         score_match = re.search(r'semantic_score["\s:]+([\d.]+)', text)
@@ -319,10 +324,10 @@ class OllamaVLMCritic:
                 data = json.loads(resp.read().decode("utf-8"))
 
             response_text = data.get("message", {}).get("content", "")
-            print(f"[ollama-vlm] Raw response: {response_text[:500]}")
+            logger.info("Ollama raw response: %s", response_text[:500])
             return self._parse_response(response_text, instruction, target)
         except Exception as exc:
-            print(f"[ollama-vlm] Error: {exc}")
+            logger.error("Ollama VLM error: %s", exc)
             return CriticVerdict(
                 fulfilled=False,
                 confidence=0.0,
@@ -461,15 +466,15 @@ class HuggingFaceVLMCritic:
                 raise ValueError("No choices in response")
             
             response_text = choices[0].get("message", {}).get("content", "")
-            print(f"[hf-vlm] Raw response: {response_text[:500]}")
+            logger.info("HF VLM raw response: %s", response_text[:500])
             return self._parse_response(response_text, instruction, target)
         except error.HTTPError as e:
             err_body = e.read().decode('utf-8')
-            print(f"[hf-vlm] API Error: {e.code} - {err_body}")
+            logger.error("HF VLM API error: %d - %s", e.code, err_body[:500])
             error_msg = f"Hugging Face API Error {e.code}"
             return self._fallback_error(error_msg)
         except Exception as exc:
-            print(f"[hf-vlm] Error: {exc}")
+            logger.error("HF VLM error: %s", exc)
             return self._fallback_error(f"HF Critic unavailable: {exc}")
 
     def _fallback_error(self, msg: str) -> CriticVerdict:

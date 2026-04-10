@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Iterable
 
+from .logging_config import log_function
 from .models import FoldedContext, SessionState, TurnRecord
+
+logger = logging.getLogger(__name__)
 
 
 class ContextFolder:

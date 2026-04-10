@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from pathlib import Path
 from typing import Callable
 
+from .logging_config import setup_logging
 from .pipeline import AgentBananaApp
 from .vision import decode_image_payload
+logger = logging.getLogger("agent_banana.server" if __name__ == "__main__" else __name__)
 
 HTML_PAGE = r"""<!doctype html>
 <html lang="en">
@@ -451,6 +455,8 @@ HTML_PAGE = r"""<!doctype html>
       _sourcePayload = dataUrl;
       document.querySelectorAll(".image-thumb").forEach(function(el) { el.classList.remove("active"); });
       img.classList.add("active");
+      welcome.style.display = "none";
+      addAgentMsg("🖼 Switched active image. Your next instruction will edit this image.", '<div class="chat-images"><div><img src="' + dataUrl + '" style="max-width:400px"><div class="img-label">Active Image</div></div></div>');
     };
     document.querySelectorAll(".image-thumb").forEach(function(el) { el.classList.remove("active"); });
     imageList.appendChild(img);
@@ -1109,7 +1115,7 @@ def make_handler(app: AgentBananaApp) -> Callable[..., BaseHTTPRequestHandler]:
             elif self.path == "/api/recompose":
                 source_payload = str(payload.get("source_image", "")).strip()
                 preview_payload = str(payload.get("preview_image", "")).strip()
-                print(f"[agent-banana] recompose: source_len={len(source_payload)}, preview_len={len(preview_payload)}, bbox={payload.get('bbox')}")
+                logger.debug("recompose: source_len=%d, preview_len=%d, bbox=%s", len(source_payload), len(preview_payload), payload.get('bbox'))
                 bbox_data = payload.get("bbox")
                 target = str(payload.get("target", "object"))
                 verb = str(payload.get("verb", "edit"))
@@ -1132,7 +1138,7 @@ def make_handler(app: AgentBananaApp) -> Callable[..., BaseHTTPRequestHandler]:
                 self._send_json(404, {"error": "Not found"})
 
         def log_message(self, format: str, *args: object) -> None:
-            print(f"[agent-banana] {self.address_string()} - {format % args}")
+            logger.debug("%s - %s", self.address_string(), format % args)
 
     return Handler
 
@@ -1144,9 +1150,14 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8010)
     args = parser.parse_args()
 
+    class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+
+    setup_logging(level="DEBUG")
+
     app = AgentBananaApp.from_env(default_root)
-    server = HTTPServer((args.host, args.port), make_handler(app))
-    print(f"Serving Agent Banana Studio on http://{args.host}:{args.port}")
+    server = ThreadedHTTPServer((args.host, args.port), make_handler(app))
+    logger.info("Serving Agent Banana Studio on http://%s:%d", args.host, args.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

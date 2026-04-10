@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
+
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox, QualityMetrics
 from .seam_detector import boundary_penalty
 from .targeting import classify_target, ideal_change_range, max_bbox_area_ratio
 from .vision import normalized_mean_difference
+
+logger = logging.getLogger(__name__)
 
 
 class QualityJudge:

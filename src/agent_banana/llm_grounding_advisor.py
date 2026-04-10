@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -19,7 +20,10 @@ from urllib import error, parse, request
 
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox
+
+logger = logging.getLogger(__name__)
 
 # Use a text model for reasoning (cheaper + faster than image-gen model)
 DEFAULT_REASONING_MODEL = "gemini-2.5-flash"
@@ -83,12 +87,14 @@ class GroundingGuidance:
     raw_response: str = ""
 
 
+@log_function
 def _image_to_png_bytes(image: Image.Image) -> bytes:
     buf = io.BytesIO()
     image.convert("RGB").save(buf, format="PNG")
     return buf.getvalue()
 
 
+@log_function
 def _parse_guidance(raw: str, image_size: tuple[int, int]) -> GroundingGuidance:
     """Extract structured guidance from the LLM's JSON response."""
     # Strip markdown fences if present
@@ -144,6 +150,7 @@ def _parse_guidance(raw: str, image_size: tuple[int, int]) -> GroundingGuidance:
     )
 
 
+@log_function
 def _call_gemini_text(
     prompt: str,
     image: Image.Image,
@@ -216,7 +223,7 @@ class GroundingAdvisor:
     ) -> GroundingGuidance:
         """Analyse the source image and return grounding guidance."""
         if not self.api_key:
-            print("[agent-banana] No API key for grounding advisor, using passthrough")
+            logger.warning("No API key for grounding advisor, using passthrough")
             return _passthrough_guidance()
 
         prompt = _ADVISOR_PROMPT.format(
@@ -233,14 +240,15 @@ class GroundingAdvisor:
                 model=self.model,
             )
             guidance = _parse_guidance(raw_text, source_image.size)
-            print(
-                f"[agent-banana] LLM advisor: {len(guidance.refined_phrases)} phrases, "
-                f"bbox_hint={'yes' if guidance.expected_bbox_hint else 'no'}, "
-                f"confidence={guidance.confidence:.2f}"
+            logger.info(
+                "LLM advisor: %d phrases, bbox_hint=%s, confidence=%.2f",
+                len(guidance.refined_phrases),
+                'yes' if guidance.expected_bbox_hint else 'no',
+                guidance.confidence,
             )
             return guidance
         except Exception as exc:
-            print(f"[agent-banana] LLM advisor failed, using passthrough: {exc}")
+            logger.error("LLM advisor failed, using passthrough: %s", exc)
             return _passthrough_guidance()
 
 

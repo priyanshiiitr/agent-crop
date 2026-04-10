@@ -7,10 +7,15 @@ warn (retry with wider taper), or reject a composition.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox
+
+logger = logging.getLogger(__name__)
 
 
 def _sobel_magnitude(gray: np.ndarray) -> np.ndarray:
@@ -59,6 +64,7 @@ def _context_strip(h: int, w: int, box: BoundingBox, inner: int = 5, outer: int 
     return mask_wide & ~mask_narrow
 
 
+@log_function
 def boundary_gradient_discontinuity(image: Image.Image, box: BoundingBox) -> float:
     """Compute BGD score: ratio of gradient at bbox boundary vs local context.
 
@@ -83,6 +89,7 @@ def boundary_gradient_discontinuity(image: Image.Image, box: BoundingBox) -> flo
     return penalty
 
 
+@log_function
 def cross_boundary_color_shift(image: Image.Image, box: BoundingBox) -> float:
     """Compute CBCS: color difference between strips just inside and outside the bbox.
 
@@ -123,6 +130,7 @@ def cross_boundary_color_shift(image: Image.Image, box: BoundingBox) -> float:
     return min(shift, 1.0)
 
 
+@log_function
 def boundary_penalty(image: Image.Image, box: BoundingBox) -> dict:
     """Combined seam detection metric.
 

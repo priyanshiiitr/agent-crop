@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PIL import Image
 
+from .logging_config import log_function
 from .models import BoundingBox
 from .vision_old import (
     assess_preview_framing,
@@ -20,6 +22,8 @@ from .vision_old import (
     save_png,
 )
 
+logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Multi-band Laplacian Pyramid Blending  (Burt & Adelson, 1983)
@@ -34,6 +38,7 @@ from .vision_old import (
 # ---------------------------------------------------------------------------
 
 
+@log_function
 def _build_gaussian_pyramid(img, levels):
     """Build a Gaussian pyramid by repeatedly downsampling."""
     import cv2
@@ -44,6 +49,7 @@ def _build_gaussian_pyramid(img, levels):
     return pyramid
 
 
+@log_function
 def _build_laplacian_pyramid(gauss_pyr):
     """Build a Laplacian pyramid from a Gaussian pyramid."""
     import cv2
@@ -57,6 +63,7 @@ def _build_laplacian_pyramid(gauss_pyr):
     return lap_pyr
 
 
+@log_function
 def _reconstruct_from_laplacian(lap_pyr):
     """Reconstruct an image from its Laplacian pyramid."""
     import cv2
@@ -67,6 +74,7 @@ def _reconstruct_from_laplacian(lap_pyr):
     return img
 
 
+@log_function
 def _laplacian_blend(source_region, patch, mask_float, levels=4):
     """Blend patch into source_region using multi-band Laplacian pyramids.
 
@@ -105,6 +113,7 @@ def _laplacian_blend(source_region, patch, mask_float, levels=4):
     return _reconstruct_from_laplacian(lp_blended)
 
 
+@log_function
 def paste_crop(base_image: Image.Image, crop: Image.Image, box: BoundingBox) -> Image.Image:
     """Paste an edited crop back onto the base image using Laplacian pyramid
     blending — the same 'Gaussian blending' technique described in the Agent
@@ -148,10 +157,10 @@ def paste_crop(base_image: Image.Image, crop: Image.Image, box: BoundingBox) -> 
         levels = max(2, min(6, int(np.log2(min(w, h))) - 2))
         blended = _laplacian_blend(source_region, patch_np, mask, levels=levels)
         blended = np.clip(blended, 0, 255).astype(np.uint8)
-        print(f"[agent-banana] paste_crop: Laplacian pyramid blend ({levels} levels, {taper}px taper)")
+        logger.info("paste_crop: Laplacian pyramid blend (%d levels, %dpx taper)", levels, taper)
     except Exception as exc:
         # Fallback: simple alpha composite
-        print(f"[agent-banana] Laplacian blend failed ({exc}), using alpha fallback")
+        logger.warning("Laplacian blend failed (%s), using alpha fallback", exc)
         blended = (source_region * (1 - mask) + patch_np * mask)
         blended = np.clip(blended, 0, 255).astype(np.uint8)
 

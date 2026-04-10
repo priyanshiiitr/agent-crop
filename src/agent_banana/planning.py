@@ -1,39 +1,169 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
+import os
 import re
+from urllib import parse, request
 from itertools import permutations, product
 from pathlib import Path
 from typing import Dict, Iterable, List
 
+from .logging_config import log_function
 from .models import FoldedContext, ParsedEdit, PlanCandidate, PlanStep
 from .targeting import classify_target
 
-VERB_ALIASES = {
-    "add": ("add", "insert", "place", "put", "include"),
-    "remove": ("remove", "delete", "erase", "take away", "clear"),
-    "replace": ("replace", "swap", "change out", "turn into"),
-    "restyle": ("restyle", "stylize", "make", "render", "give"),
-    "adjust": ("adjust", "change", "modify", "brighten", "darken", "recolor", "move", "resize"),
-}
-GLOBAL_HINTS = {
-    "background",
-    "entire image",
-    "whole image",
-    "overall",
-    "global",
-    "lighting",
-    "mood",
-    "style",
-    "scene",
-}
+logger = logging.getLogger(__name__)
+
 MODE_CONFIG = {
     "preview_tight": {"padding": 10, "risk": 0.12},
     "preview_local": {"padding": 22, "risk": 0.18},
     "preview_expand": {"padding": 42, "risk": 0.29},
     "global_preview": {"padding": 12, "risk": 0.52},
 }
+
+_PARSER_PROMPT = """\
+You are an intelligent image editing intent parser. Your task is to analyze user instructions and convert them into a structured sequence of actions.
+
+Available Canonical Verbs:
+- add: inserting, placing, or including a new object.
+- remove: deleting, erasing, or taking away an object.
+- replace: swapping, changing out, or turning an object into something else.
+- restyle: stylizing, rendering, or giving a specific look to the image/object.
+- adjust: modifying, brightening, darkening, recoloring, moving, or resizing.
+
+## Instruction
+{instruction}
+
+## Context (Active Entities)
+{context_entities}
+
+## Task
+Break the instruction down into distinct logical edits. If the instruction implies chained actions (e.g. "remove the dog then add a cat"), split them.
+For each action, extract:
+1. verb: strictly one of the canonical verbs above.
+2. segment: the specific chunk of the original instruction that describes this step.
+3. target: the main subject or object being modified.
+4. modifiers: an array of strings detailing the condition, location, or transformation (e.g., "to the left", "with a red shirt", "brighter").
+5. scope: "local" if acting on a specific object, "global" if acting on the whole image (e.g. "background", "entire image", "style", "mood").
+
+Reply ONLY with a JSON array of objects:
+```json
+[
+  {{
+    "verb": "replace",
+    "segment": "swap the dog with a cat",
+    "target": "dog",
+    "modifiers": ["with a cat"],
+    "scope": "local"
+  }}
+]
+```
+"""
+
+@log_function
+def _call_gemini_parser(
+    prompt: str,
+    api_key: str,
+    model: str = "gemini-2.0-flash",
+    api_base: str = "https://generativelanguage.googleapis.com/v1beta/models",
+    timeout: int = 15,
+) -> str:
+    url = f"{api_base}/{parse.quote(model, safe='')}:generateContent"
+    payload = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "responseMimeType": "text/plain",
+            "temperature": 0.1,
+            "maxOutputTokens": 1024,
+        },
+    }
+
+    req = request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "x-goog-api-key": api_key,
+        },
+        method="POST",
+    )
+    with request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+
+    response_data = json.loads(raw)
+    texts = []
+    for candidate in response_data.get("candidates", []):
+        for part in (candidate.get("content", {})).get("parts", []):
+            if part.get("text"):
+                texts.append(part["text"].strip())
+    return "\n".join(texts)
+
+class EditParser:
+    def __init__(self, api_key: str | None = None, model: str | None = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        self.model = model or "gemini-2.0-flash"
+
+    def parse(self, instruction: str, context: FoldedContext | None = None) -> List[ParsedEdit]:
+        if not self.api_key:
+            logger.warning("No API key for EditParser, falling back to basic single edit")
+            return [self._fallback_edit(instruction)]
+
+        context_entities = ", ".join(context.active_entities) if context and context.active_entities else "None"
+        prompt = _PARSER_PROMPT.format(instruction=instruction, context_entities=context_entities)
+
+        try:
+            raw_text = _call_gemini_parser(prompt, api_key=self.api_key, model=self.model)
+            cleaned = re.sub(r"```(?:json)?", "", raw_text).strip().rstrip("`").strip()
+
+            match = re.search(r"\[.*\]", cleaned, re.DOTALL)
+            if match:
+                data = json.loads(match.group())
+            else:
+                data = json.loads(cleaned)
+                if isinstance(data, dict):
+                    data = [data]
+
+            edits = []
+            for index, item in enumerate(data):
+                verb = item.get("verb", "adjust").lower()
+                if verb not in {"add", "remove", "replace", "restyle", "adjust"}:
+                    verb = "adjust"
+                dependencies = []
+                if index > 0:
+                    dependencies.append(edits[-1].edit_id)
+
+                edits.append(
+                    ParsedEdit(
+                        edit_id=f"edit-{index + 1}",
+                        original_text=item.get("segment", instruction),
+                        verb=verb,
+                        target=item.get("target", "main subject"),
+                        scope=item.get("scope", "local").lower(),
+                        priority=index,
+                        dependencies=dependencies,
+                        modifiers=item.get("modifiers", []),
+                    )
+                )
+            if edits:
+                return edits
+        except Exception as exc:
+            logger.error(f"Error calling LLM parser: {exc}")
+
+        return [self._fallback_edit(instruction)]
+
+    def _fallback_edit(self, instruction: str) -> ParsedEdit:
+        return ParsedEdit(
+            edit_id="edit-1",
+            original_text=instruction.strip(),
+            verb="adjust",
+            target="main subject",
+            scope="local",
+            priority=0,
+            dependencies=[],
+            modifiers=[],
+        )
 
 
 class RLValueStore:
@@ -69,114 +199,6 @@ class RLValueStore:
             payload["visits"] = visits
             payload["value"] = old_value + (reward - old_value) / visits
         self.path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
-
-
-class EditParser:
-    def parse(self, instruction: str, context: FoldedContext | None = None) -> List[ParsedEdit]:
-        segments = self._split_instruction(instruction)
-        edits: List[ParsedEdit] = []
-        chained_order = any(token in instruction.lower() for token in ("then", "after", "finally"))
-
-        for index, segment in enumerate(segments):
-            verb = self._detect_verb(segment)
-            target, modifiers = self._extract_target_and_modifiers(segment, verb)
-            scope = self._detect_scope(segment, target, context)
-            dependencies = []
-            if chained_order and index > 0:
-                dependencies.append(edits[-1].edit_id)
-            edits.append(
-                ParsedEdit(
-                    edit_id=f"edit-{index + 1}",
-                    original_text=segment,
-                    verb=verb,
-                    target=target,
-                    scope=scope,
-                    priority=index,
-                    dependencies=dependencies,
-                    modifiers=modifiers,
-                )
-            )
-
-        if edits:
-            return edits
-
-        return [
-            ParsedEdit(
-                edit_id="edit-1",
-                original_text=instruction.strip(),
-                verb="adjust",
-                target="main subject",
-                scope="local",
-                priority=0,
-                dependencies=[],
-                modifiers=[],
-            )
-        ]
-
-    def _split_instruction(self, instruction: str) -> List[str]:
-        raw_parts = re.split(r"\s*(?:;|,|\band then\b|\bthen\b|\balso\b|\bplus\b|\nafter\b|\n)\s*", instruction, flags=re.IGNORECASE)
-        parts: List[str] = []
-        for raw_part in raw_parts:
-            part = raw_part.strip(" .")
-            if not part:
-                continue
-            if " and " in part.lower() and self._count_verb_hits(part) >= 2:
-                parts.extend(sub.strip(" .") for sub in re.split(r"\s+\band\b\s+", part, flags=re.IGNORECASE) if sub.strip(" ."))
-            else:
-                parts.append(part)
-        return parts
-
-    def _count_verb_hits(self, text: str) -> int:
-        lowered = text.lower()
-        hits = 0
-        for aliases in VERB_ALIASES.values():
-            if any(alias in lowered for alias in aliases):
-                hits += 1
-        return hits
-
-    def _detect_verb(self, segment: str) -> str:
-        lowered = segment.lower()
-        for canonical, aliases in VERB_ALIASES.items():
-            if any(re.search(rf"\b{re.escape(alias)}\b", lowered) for alias in aliases):
-                return canonical
-        return "adjust"
-
-    def _extract_target_and_modifiers(self, segment: str, verb: str) -> tuple[str, List[str]]:
-        lowered = segment.lower()
-        modifiers: List[str] = []
-        match_end = 0
-        for alias in VERB_ALIASES[verb]:
-            match = re.search(rf"\b{re.escape(alias)}\b", lowered)
-            if match:
-                match_end = match.end()
-                break
-        remainder = segment[match_end:].strip() if match_end else segment.strip()
-        remainder = re.sub(r"^(the|a|an)\s+", "", remainder, flags=re.IGNORECASE).strip()
-
-        if verb == "replace" and re.search(r"\bwith\b", remainder, flags=re.IGNORECASE):
-            target, replacement = re.split(r"\bwith\b", remainder, maxsplit=1, flags=re.IGNORECASE)
-            modifiers.append(f"with {replacement.strip()}")
-            remainder = target.strip()
-        elif verb == "add" and re.search(r"\bto\b", remainder, flags=re.IGNORECASE):
-            target, location = re.split(r"\bto\b", remainder, maxsplit=1, flags=re.IGNORECASE)
-            modifiers.append(f"to {location.strip()}")
-            remainder = target.strip()
-        elif re.search(r"\b(?:in|on|at|into|from|near)\b", remainder, flags=re.IGNORECASE):
-            target, location = re.split(r"\b(?:in|on|at|into|from|near)\b", remainder, maxsplit=1, flags=re.IGNORECASE)
-            modifiers.append(location.strip())
-            remainder = target.strip()
-
-        if not remainder:
-            remainder = "main subject"
-        return remainder, modifiers
-
-    def _detect_scope(self, segment: str, target: str, context: FoldedContext | None) -> str:
-        lowered = f"{segment} {target}".lower()
-        if any(hint in lowered for hint in GLOBAL_HINTS):
-            return "global"
-        if context and target.lower() in {entity.lower() for entity in context.active_entities}:
-            return "local"
-        return "local"
 
 
 class RLPlanner:
